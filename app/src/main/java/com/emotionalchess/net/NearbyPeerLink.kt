@@ -123,12 +123,10 @@ class NearbyPeerLink(context: Context) : PeerLink {
         val code = (e as? ApiException)?.statusCode
         return when (code) {
             ConnectionsStatusCodes.STATUS_ALREADY_ADVERTISING, ConnectionsStatusCodes.STATUS_ALREADY_DISCOVERING -> "$what: already searching."
-            ConnectionsStatusCodes.MISSING_PERMISSION_ACCESS_FINE_LOCATION,
-            ConnectionsStatusCodes.MISSING_PERMISSION_BLUETOOTH_SCAN,
-            ConnectionsStatusCodes.MISSING_PERMISSION_BLUETOOTH_ADVERTISE,
-            ConnectionsStatusCodes.MISSING_PERMISSION_BLUETOOTH_CONNECT,
-            ConnectionsStatusCodes.MISSING_PERMISSION_NEARBY_WIFI_DEVICES -> "$what: the app needs the Nearby devices permission."
-            else -> "$what. Check that Bluetooth and Wi-Fi are on." + (code?.let { " ($it)" } ?: "")
+            in ConnectionsStatusCodes.MISSING_PERMISSION_NEARBY_WIFI_DEVICES..ConnectionsStatusCodes.MISSING_PERMISSION_BLUETOOTH_CONNECT ->
+                "$what: Emotional Chess needs the Location and Nearby devices permissions. " +
+                    "Allow them in Settings → Apps → Emotional Chess → Permissions, turn Location on, and try again. ($code)"
+            else -> "$what. Check that Bluetooth, Wi-Fi and Location are on." + (code?.let { " ($it)" } ?: "")
         }
     }
 
@@ -137,23 +135,21 @@ class NearbyPeerLink(context: Context) : PeerLink {
         /** One-to-one connection with the best bandwidth. */
         private val STRATEGY = Strategy.P2P_POINT_TO_POINT
 
-        /** Runtime permissions Nearby needs on this Android version. */
-        fun permissions(): Array<String> = when {
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU -> arrayOf(
-                Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_ADVERTISE,
-                Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.NEARBY_WIFI_DEVICES,
-            )
-            // Android 12 only grants precise location together with approximate location.
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> arrayOf(
-                Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_ADVERTISE,
-                Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.ACCESS_FINE_LOCATION,
-                Manifest.permission.ACCESS_COARSE_LOCATION,
-            )
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q -> arrayOf(
-                Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION,
-            )
-            else -> arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION)
-        }
+        /**
+         * Runtime permissions Nearby needs on this Android version. Location is needed on every
+         * version: without it discovery fails with MISSING_PERMISSION_ACCESS_COARSE_LOCATION
+         * (seen on Android 17). Android 12+ only grants precise location together with approximate.
+         */
+        fun permissions(): Array<String> = buildList {
+            add(Manifest.permission.ACCESS_FINE_LOCATION)
+            add(Manifest.permission.ACCESS_COARSE_LOCATION)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                add(Manifest.permission.BLUETOOTH_SCAN)
+                add(Manifest.permission.BLUETOOTH_ADVERTISE)
+                add(Manifest.permission.BLUETOOTH_CONNECT)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) add(Manifest.permission.NEARBY_WIFI_DEVICES)
+        }.toTypedArray()
 
         fun hasPermissions(context: Context): Boolean = permissions().all {
             ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
