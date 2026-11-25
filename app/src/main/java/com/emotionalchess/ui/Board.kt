@@ -61,7 +61,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import com.emotionalchess.R
+import com.emotionalchess.engine.Action
 import com.emotionalchess.engine.GameState
+import com.emotionalchess.engine.Hint
 import com.emotionalchess.engine.Kind
 import com.emotionalchess.engine.Mode
 import com.emotionalchess.engine.Mood
@@ -115,9 +117,13 @@ fun ChessBoard(
     flipped: Boolean,
     onTap: (Int) -> Unit,
     modifier: Modifier = Modifier,
+    hint: Hint? = null,
 ) {
     val scheme = MaterialTheme.colorScheme
-    val targetSquares = targets.map { it.to }.toSet()
+    // A castling move can be entered on the king's destination or on the rook.
+    val targetSquares = targets.flatMap { listOfNotNull(it.to, if (it.castle) it.rookFrom else null) }.toSet()
+    val hintMove = (hint?.action as? Action.Play)?.move
+    val hintHeal = (hint?.action as? Action.Heal)?.square
     val checkSquare = if (game.result == null && Rules.inCheck(game)) Rules.kingSquare(game.board, game.toMove) else null
     val absolvable = Rules.legalAbsolutions(game).toSet()
     val last = game.lastMove
@@ -161,6 +167,12 @@ fun ChessBoard(
                     else -> DarkSquare
                 }
                 drawRect(colour, tl, Size(c, c))
+                // The goal squares of King of the Hill and Racing Kings.
+                if ((game.mode == Mode.KING_OF_THE_HILL && sq in Rules.HILL) || (game.mode == Mode.RACING_KINGS && Rules.rank(sq) == 7)) {
+                    drawRect(Color(0x33FFC66E), tl, Size(c, c))
+                    val w = c * 0.05f
+                    drawRect(Color(0xCCFFB02E), tl + Offset(w / 2, w / 2), Size(c - w, c - w), style = Stroke(w))
+                }
                 if (sq == selected) drawRect(scheme.primary.copy(alpha = 0.5f), tl, Size(c, c))
                 if (sq in absolvable) {
                     drawRect(
@@ -196,6 +208,10 @@ fun ChessBoard(
                     }
                 }
             }
+            if (hintHeal != null) {
+                val tl = Offset(col(hintHeal) * c, row(hintHeal) * c)
+                drawCircle(scheme.tertiary.copy(alpha = 0.9f), c * 0.47f, tl + Offset(c / 2, c / 2), style = Stroke(c * 0.07f))
+            }
             // Coordinates along the left and bottom edges.
             val labelStyle = TextStyle(fontSize = (c * 0.2f).toSp(), fontWeight = FontWeight.Bold)
             for (i in 0..7) {
@@ -230,6 +246,17 @@ fun ChessBoard(
                     cell = cell,
                     onTop = last != null && last.to == sq,
                 )
+            }
+        }
+
+        game.explosion?.let { at -> key("boom", game.log.size) { Explosion(cell * (col(at) - 1), cell * (row(at) - 1), cell * 3) } }
+
+        if (hintMove != null) {
+            Canvas(Modifier.fillMaxSize().zIndex(2f)) {
+                val c = size.width / 8
+                val from = Offset(col(hintMove.from) * c + c / 2, row(hintMove.from) * c + c / 2)
+                val to = Offset(col(hintMove.to) * c + c / 2, row(hintMove.to) * c + c / 2)
+                drawArrow(from, to, c, scheme.tertiary.copy(alpha = 0.85f))
             }
         }
 
@@ -274,6 +301,7 @@ private fun BoardPiece(piece: Piece, mode: Mode, x: Dp, y: Dp, cell: Dp, onTop: 
         when (piece.mood) {
             Mood.GUILTY -> MoodGlow(glow) { 0.8f }
             Mood.DEVASTATED -> MoodGlow(glow) { 0.85f }
+            Mood.INFECTED -> MoodGlow(glow) { 0.9f }
             Mood.PSYCHOPATH -> {
                 val beat = rememberInfiniteTransition(label = "beat").animateFloat(
                     0.55f, 1f, infiniteRepeatable(tween(700), RepeatMode.Reverse), label = "beat",
@@ -300,17 +328,18 @@ private fun BoardPiece(piece: Piece, mode: Mode, x: Dp, y: Dp, cell: Dp, onTop: 
                 },
         )
 
-        if (piece.mood == Mood.DEVASTATED) {
+        if (piece.dying) {
             Box(
                 Modifier
                     .align(Alignment.TopEnd)
                     .padding(cell * 0.03f)
                     .size(cell * 0.34f)
-                    .background(moodColor(Mood.DEVASTATED)!!, CircleShape),
+                    .background(moodColor(piece.mood)!!, CircleShape),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    piece.countdown.toString(), color = Color.White, fontWeight = FontWeight.Black,
+                    piece.countdown.toString(), color = if (piece.mood == Mood.INFECTED) Color(0xFF1B2A05) else Color.White,
+                    fontWeight = FontWeight.Black,
                     fontSize = (cell.value * 0.22f).sp, lineHeight = (cell.value * 0.22f).sp,
                 )
             }
@@ -322,6 +351,57 @@ private fun BoardPiece(piece: Piece, mode: Mode, x: Dp, y: Dp, cell: Dp, onTop: 
                 modifier = Modifier.align(Alignment.TopEnd).offset(x = cell * 0.02f, y = -cell * 0.03f),
             )
         }
+        if (piece.perks.isNotEmpty()) {
+            Text(
+                piece.perks.joinToString("") { it.emoji },
+                fontSize = (cell.value * 0.2f).sp,
+                lineHeight = (cell.value * 0.2f).sp,
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .background(Color(0xCC1A1022), RoundedCornerShape(cell * 0.1f))
+                    .padding(horizontal = cell * 0.02f),
+            )
+        }
+    }
+}
+
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawArrow(from: Offset, to: Offset, cell: Float, colour: Color) {
+    val d = to - from
+    val len = d.getDistance()
+    if (len < 1f) return
+    val dir = d / len
+    val normal = Offset(-dir.y, dir.x)
+    val head = cell * 0.42f
+    val tip = to - dir * (cell * 0.12f)
+    val base = tip - dir * head
+    drawLine(colour, from + dir * (cell * 0.2f), base, strokeWidth = cell * 0.16f, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+    val path = androidx.compose.ui.graphics.Path().apply {
+        moveTo(tip.x, tip.y)
+        lineTo(base.x + normal.x * head * 0.6f, base.y + normal.y * head * 0.6f)
+        lineTo(base.x - normal.x * head * 0.6f, base.y - normal.y * head * 0.6f)
+        close()
+    }
+    drawPath(path, colour)
+}
+
+/** Atomic: a burst over the 3×3 squares around a capture. */
+@Composable
+private fun Explosion(x: Dp, y: Dp, size: Dp) {
+    val t = remember { Animatable(0f) }
+    LaunchedEffect(Unit) { t.animateTo(1f, tween(700)) }
+    Canvas(Modifier.offset(x, y).size(size).zIndex(3f)) {
+        val p = t.value
+        if (p >= 1f) return@Canvas
+        val r = this.size.minDimension / 2 * (0.3f + 0.9f * p)
+        drawCircle(
+            Brush.radialGradient(
+                0f to Color(0xFFFFF3B0).copy(alpha = 1f - p),
+                0.4f to Color(0xFFFF8A1F).copy(alpha = 0.9f * (1f - p)),
+                1f to Color(0x00FF3D00),
+                center = center, radius = r,
+            ),
+            radius = r,
+        )
     }
 }
 

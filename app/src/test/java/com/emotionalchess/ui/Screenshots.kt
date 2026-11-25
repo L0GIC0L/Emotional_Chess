@@ -18,6 +18,7 @@ import com.emotionalchess.engine.Kind
 import com.emotionalchess.engine.Mode
 import com.emotionalchess.engine.Mood
 import com.emotionalchess.engine.Move
+import com.emotionalchess.engine.Perk
 import com.emotionalchess.engine.Piece
 import com.emotionalchess.engine.RollRecord
 import com.emotionalchess.engine.Rules
@@ -93,7 +94,7 @@ class Screenshots {
     }
 
     @Test fun newGame() = paparazzi.snapshot {
-        EmotionalChessTheme { Backdrop { NewGameScreen { _, _, _ -> } } }
+        EmotionalChessTheme { Backdrop { NewGameScreen { _, _, _, _ -> } } }
     }
 
     @Test fun midGame() = paparazzi.snapshot {
@@ -133,5 +134,58 @@ class Screenshots {
             DeviceConfig.PIXEL_6.copy(screenWidth = 2208, screenHeight = 1840, orientation = ScreenOrientation.LANDSCAPE)
         )
         paparazzi.snapshot { EmotionalChessTheme { App(vmFor(sampleGame(), select = "e7")) } }
+    }
+
+    /** Same position as [sampleGame], dressed up for another mode. */
+    private fun restyled(mode: Mode, dress: (Piece, String) -> Piece): GameState {
+        val g = sampleGame()
+        val board = g.board.mapIndexed { i, p -> p?.let { dress(it.copy(mood = Mood.CALM, countdown = 0), Rules.squareName(i)) } }
+        return g.copy(mode = mode, board = board, log = listOf("11. Nd2–f3", "11… Ng6xe7", "12. Pd4xe5", "12… Qd8xe6", "13. Nf3xe5", "13… Qd8–d7"), rolls = emptyList())
+    }
+
+    @Test fun plague() = paparazzi.snapshot {
+        val g = restyled(Mode.PLAGUE) { p, at ->
+            when (at) {
+                "e5", "d7" -> p.copy(mood = Mood.INFECTED, countdown = 3)
+                "e7" -> p.copy(mood = Mood.INFECTED, countdown = 1)
+                "d4", "f3" -> p.copy(mood = Mood.IMMUNE)
+                else -> p
+            }
+        }
+        EmotionalChessTheme { App(vmFor(g, select = "e5")) }
+    }
+
+    @Test fun roguelike() = paparazzi.snapshot {
+        val g = restyled(Mode.ROGUELIKE) { p, at ->
+            when (at) {
+                "f3" -> p.copy(perks = listOf(Perk.CHARGE, Perk.SHIELD))
+                "d7" -> p.copy(perks = listOf(Perk.LEAP))
+                "e5" -> p.copy(perks = listOf(Perk.STEP))
+                else -> p
+            }
+        }
+        EmotionalChessTheme { App(vmFor(g, select = "f3")) }
+    }
+
+    @Test fun perkChoice() = paparazzi.snapshot {
+        val g = restyled(Mode.ROGUELIKE) { p, _ -> p }.copy(pendingPerk = sq("f3"), perkOffer = listOf(Perk.LEAP, Perk.SHIELD, Perk.CHARGE))
+        EmotionalChessTheme { Backdrop { Box(Modifier.padding(24.dp)) { PerkCard(g, suggested = Perk.SHIELD, onPick = {}, onHint = {}, thinking = false) } } }
+    }
+
+    @Test fun racingKings() = paparazzi.snapshot {
+        EmotionalChessTheme { App(vmFor(Rules.newGame(Mode.RACING_KINGS, "Ada", "Grace"))) }
+    }
+
+    @Test fun hint() {
+        // Set up outside the composable: inside it, snapshot isolation would hide the finished hint.
+        var g = Rules.newGame(Mode.KING_OF_THE_HILL, "Ada", "Grace")
+        for ((f, t) in listOf("e2" to "e4", "e7" to "e5", "g1" to "f3", "b8" to "c6", "f1" to "c4", "d7" to "d6")) {
+            g = Rules.play(g, Rules.legalMovesFrom(g, sq(f)).first { it.to == sq(t) })
+        }
+        val vm = vmFor(g)
+        vm.requestHint()
+        val deadline = System.currentTimeMillis() + 10_000
+        while (vm.thinking && System.currentTimeMillis() < deadline) Thread.sleep(20)
+        paparazzi.snapshot { EmotionalChessTheme { App(vm) } }
     }
 }

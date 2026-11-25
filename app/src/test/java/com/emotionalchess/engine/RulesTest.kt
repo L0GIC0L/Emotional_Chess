@@ -109,13 +109,30 @@ class RulesTest {
     }
 
     @Test
-    fun bishopCannotAbsolveItself() {
+    fun bishopAbsolvesItself() {
+        for (mood in listOf(Mood.GUILTY, Mood.DEVASTATED)) {
+            val g = position(
+                Mode.EMOTIONAL, Side.WHITE,
+                "e1" to w(Kind.KING), "h8" to b(Kind.KING),
+                "c3" to w(Kind.BISHOP, mood).copy(countdown = 2),
+            )
+            assertEquals(sq("c3"), Rules.absolverFor(g, sq("c3")))
+            val after = Rules.absolve(g, sq("c3"))
+            assertEquals(Mood.UNAFFECTED, after.board[sq("c3")]!!.mood)
+            assertTrue(after.log.last().endsWith("absolves itself"))
+        }
+    }
+
+    @Test
+    fun classicRemorsefulBishopForgivesItself() {
         val g = position(
-            Mode.EMOTIONAL, Side.WHITE,
+            Mode.CLASSIC, Side.WHITE,
             "e1" to w(Kind.KING), "h8" to b(Kind.KING),
-            "c3" to w(Kind.BISHOP, Mood.GUILTY),
+            "c3" to w(Kind.BISHOP, Mood.GUILTY), "d4" to w(Kind.KNIGHT, Mood.GUILTY),
         )
-        assertNull(Rules.absolverFor(g, sq("c3")))
+        assertEquals(sq("c3"), Rules.absolverFor(g, sq("c3")))
+        assertNull("other pieces still need a bishop to move next to them", Rules.absolverFor(g, sq("d4")))
+        assertEquals(Mood.CALM, Rules.absolve(g, sq("c3")).board[sq("c3")]!!.mood)
     }
 
     @Test

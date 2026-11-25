@@ -46,6 +46,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Flag
+import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SwapVert
@@ -55,7 +56,12 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -72,6 +78,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -92,9 +99,13 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import com.emotionalchess.engine.Action
 import com.emotionalchess.engine.GameState
 import com.emotionalchess.engine.Kind
 import com.emotionalchess.engine.Mode
+import com.emotionalchess.engine.ModeGroup
+import com.emotionalchess.engine.Perk
 import com.emotionalchess.engine.Mood
 import com.emotionalchess.engine.Move
 import com.emotionalchess.engine.Rules
@@ -113,53 +124,70 @@ fun App(vm: GameViewModel) {
 // ======================================================================= new game
 
 @Composable
-fun NewGameScreen(onStart: (Mode, String, String) -> Unit) {
-    var mode by rememberSaveable { mutableStateOf(Mode.EMOTIONAL) }
+fun NewGameScreen(onStart: (Mode, String, String, Int) -> Unit) {
+    var mode by rememberSaveable { mutableStateOf(Mode.STANDARD) }
     var white by rememberSaveable { mutableStateOf("") }
     var black by rememberSaveable { mutableStateOf("") }
+    var hints by rememberSaveable { mutableIntStateOf(3) }
     var showRules by remember { mutableStateOf(false) }
 
-    Box(Modifier.fillMaxSize().systemBarsPadding().imePadding(), contentAlignment = Alignment.TopCenter) {
+    Column(Modifier.fillMaxSize().systemBarsPadding().imePadding(), horizontalAlignment = Alignment.CenterHorizontally) {
         Column(
             Modifier
+                .weight(1f)
                 .widthIn(max = 560.dp)
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 22.dp, vertical = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(4.dp))
             HeroPieces()
             Text("Emotional Chess", style = MaterialTheme.typography.displayMedium, textAlign = TextAlign.Center)
             Text(
-                "Remorse chess for a real board and a real friend.\nEvery capture leaves a mark.",
+                "Chess for a real board and a real friend.\nPlain, strange, or full of feelings.",
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
             )
-            Spacer(Modifier.height(4.dp))
-            SectionLabel("Variant")
-            VariantCard(
-                emoji = "🎲", title = Mode.EMOTIONAL.title, selected = mode == Mode.EMOTIONAL,
-                text = "A piece's first capture rolls a die: devastated, guilt-ridden, unaffected… or psychopath. Bishops absolve the afflicted.",
-            ) { mode = Mode.EMOTIONAL }
-            VariantCard(
-                emoji = "✝️", title = Mode.CLASSIC.title, selected = mode == Mode.CLASSIC,
-                text = "Every capture makes the piece remorseful. It can't capture or give check until a friendly bishop comes to forgive it.",
-            ) { mode = Mode.CLASSIC }
+            for (group in ModeGroup.entries) {
+                SectionLabel(group.title)
+                for (m in Mode.entries.filter { it.group == group }) ModeRow(m, mode == m) { mode = m }
+            }
             SectionLabel("Players")
             PlayerField(white, { white = it }, Side.WHITE, ImeAction.Next)
             PlayerField(black, { black = it }, Side.BLACK, ImeAction.Done)
-            Spacer(Modifier.height(6.dp))
-            GlowButton("Begin the game") { onStart(mode, white.trim(), black.trim()) }
+            SectionLabel("Hints")
+            HintChoice(hints) { hints = it }
+        }
+        Column(
+            Modifier.widthIn(max = 560.dp).padding(horizontal = 22.dp).padding(top = 8.dp, bottom = 4.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            GlowButton("Begin · ${mode.emoji} ${mode.title}") { onStart(mode, white.trim(), black.trim(), hints) }
             TextButton(onClick = { showRules = true }) {
                 Icon(Icons.AutoMirrored.Filled.MenuBook, null)
                 Spacer(Modifier.width(8.dp))
-                Text("How to play")
+                Text("How to play ${mode.title}")
             }
         }
     }
     if (showRules) RulesSheet(mode) { showRules = false }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun HintChoice(value: Int, onChange: (Int) -> Unit) {
+    val options = listOf(0 to "Off", 3 to "3 each", -1 to "Unlimited")
+    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+        options.forEachIndexed { i, (v, label) ->
+            SegmentedButton(
+                selected = value == v,
+                onClick = { onChange(v) },
+                shape = SegmentedButtonDefaults.itemShape(i, options.size),
+            ) { Text(label) }
+        }
+    }
 }
 
 /** A little board fragment with three pieces wearing their feelings. */
@@ -203,24 +231,23 @@ private fun SectionLabel(text: String) {
 }
 
 @Composable
-private fun VariantCard(emoji: String, title: String, text: String, selected: Boolean, onClick: () -> Unit) {
+private fun ModeRow(mode: Mode, selected: Boolean, onClick: () -> Unit) {
     val scheme = MaterialTheme.colorScheme
     val border by animateColorAsState(if (selected) scheme.primary else scheme.outlineVariant, label = "border")
     Surface(
         onClick = onClick,
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(18.dp),
         color = if (selected) scheme.primaryContainer.copy(alpha = 0.55f) else scheme.surfaceContainer,
         contentColor = scheme.onSurface,
         border = BorderStroke(if (selected) 2.dp else 1.dp, border),
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(emoji, fontSize = 30.sp)
-            Spacer(Modifier.width(14.dp))
+        Row(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(mode.emoji, fontSize = 24.sp)
+            Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                Spacer(Modifier.height(2.dp))
-                Text(text, style = MaterialTheme.typography.bodyMedium, color = scheme.onSurfaceVariant)
+                Text(mode.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                Text(mode.tagline, style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
             }
             RadioButton(selected = selected, onClick = onClick)
         }
@@ -299,7 +326,7 @@ fun GameScreen(vm: GameViewModel, game: GameState) {
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
                 title = {
                     Text(
-                        if (game.mode == Mode.EMOTIONAL) "🎲 Emotional" else "✝️ Classic",
+                        "${game.mode.emoji} ${game.mode.title}",
                         style = MaterialTheme.typography.titleLarge,
                         maxLines = 1, overflow = TextOverflow.Ellipsis,
                     )
@@ -331,7 +358,7 @@ fun GameScreen(vm: GameViewModel, game: GameState) {
         BoxWithConstraints(Modifier.fillMaxSize().padding(pad)) {
             val top = if (vm.flipped) Side.WHITE else Side.BLACK
             val board = @Composable { m: Modifier ->
-                ChessBoard(game, vm.selected, vm.targets, vm.flipped, vm::onSquareTapped, m)
+                ChessBoard(game, vm.selected, vm.targets, vm.flipped, vm::onSquareTapped, m, hint = vm.hint)
             }
             // Wide or near-square windows (unfolded Pixel Fold, tablets, landscape): side by side.
             if (maxWidth >= 600.dp && maxWidth >= maxHeight * 0.9f) {
@@ -340,7 +367,7 @@ fun GameScreen(vm: GameViewModel, game: GameState) {
                     board(Modifier.size(boardSize))
                     Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         PlayerBar(game, top)
-                        StatusBanner(game)
+                        StatusBanner(vm, game)
                         PieceCard(vm, game)
                         MoveLog(game, Modifier.weight(1f))
                         PlayerBar(game, top.other)
@@ -356,7 +383,7 @@ fun GameScreen(vm: GameViewModel, game: GameState) {
                     PlayerBar(game, top, Modifier.widthIn(max = boardMax))
                     board(Modifier.widthIn(max = boardMax).fillMaxWidth())
                     PlayerBar(game, top.other, Modifier.widthIn(max = boardMax))
-                    StatusBanner(game)
+                    StatusBanner(vm, game)
                     PieceCard(vm, game)
                     MoveLog(game, Modifier.weight(1f))
                 }
@@ -367,6 +394,11 @@ fun GameScreen(vm: GameViewModel, game: GameState) {
     // ---------------- dialogs
     if (game.pendingRoll != null || vm.rollReveal != null) DiceDialog(game, vm.rollReveal, vm::roll, vm::dismissRoll)
     vm.promotionChoices?.let { PromotionDialog(it, game.toMove, vm::choosePromotion) }
+    if (game.pendingPerk != null) {
+        Dialog(onDismissRequest = {}, properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false)) {
+            PerkCard(game, suggested = (vm.hint?.action as? Action.Pick)?.perk, onPick = vm::choosePerk, onHint = vm::requestHint, thinking = vm.thinking)
+        }
+    }
     if (game.result != null && vm.showResult && vm.rollReveal == null) {
         Dialog(onDismissRequest = vm::dismissResult) {
             ReportCard(game, onNewGame = vm::closeGame, onUndo = vm::undo, onViewBoard = vm::dismissResult)
@@ -431,7 +463,11 @@ private fun PlayerBar(game: GameState, side: Side, modifier: Modifier = Modifier
             maxLines = 1, overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f, fill = false),
         )
-        for (mood in listOf(Mood.PSYCHOPATH, Mood.GUILTY, Mood.DEVASTATED)) {
+        if (game.mode == Mode.THREE_CHECK) {
+            Spacer(Modifier.width(6.dp))
+            Text("⚡${game.checksBy(side)}/3", style = MaterialTheme.typography.labelLarge, color = scheme.tertiary)
+        }
+        for (mood in listOf(Mood.PSYCHOPATH, Mood.GUILTY, Mood.DEVASTATED, Mood.INFECTED)) {
             val n = game.board.count { it?.side == side && it.mood == mood }
             if (n > 0) {
                 Spacer(Modifier.width(6.dp))
@@ -448,7 +484,12 @@ private fun PlayerBar(game: GameState, side: Side, modifier: Modifier = Modifier
                 horizontalArrangement = Arrangement.spacedBy((-8).dp),
             ) {
                 for (f in taken) {
-                    PieceImage(f.kind, f.side, Modifier.size(22.dp), tint = if (f.despair) Color(0xFF8FC4FF) else null)
+                    val tint = when {
+                        !f.despair -> null
+                        game.mode == Mode.PLAGUE -> Color(0xFFB8E07A)
+                        else -> Color(0xFF8FC4FF)
+                    }
+                    PieceImage(f.kind, f.side, Modifier.size(22.dp), tint = tint)
                 }
             }
         }
@@ -462,10 +503,11 @@ private fun PlayerBar(game: GameState, side: Side, modifier: Modifier = Modifier
 private data class Status(val emoji: String, val title: String, val detail: String, val tone: Color)
 
 @Composable
-private fun StatusBanner(game: GameState) {
+private fun StatusBanner(vm: GameViewModel, game: GameState) {
     val scheme = MaterialTheme.colorScheme
     val name = game.playerName(game.toMove)
     val result = game.result
+    val hint = vm.hint
     val status = when {
         result != null -> Status(
             if (result.winner != null) "👑" else "🤝",
@@ -476,51 +518,97 @@ private fun StatusBanner(game: GameState) {
             "🎲", "Roll the die",
             "${game.board[game.pendingRoll]?.name} made its first capture.", scheme.tertiary,
         )
+        game.pendingPerk != null -> Status(
+            "⭐", "Level up!", "Pick a perk for the ${game.board[game.pendingPerk]?.kind?.label?.lowercase()}.", scheme.tertiary,
+        )
+        hint != null -> Status("💡", hint.text, "Hint for $name – shown on the board.", scheme.tertiary)
         game.bonusSquare != null -> Status(
             "😈", "$name strikes again",
             "The psychopath on ${Rules.squareName(game.bonusSquare)} must move again.", moodColor(Mood.PSYCHOPATH)!!,
         )
         Rules.inCheck(game) -> Status("⚔️", "Check!", "$name must protect the king.", scheme.error)
-        else -> {
-            val absolve = Rules.legalAbsolutions(game)
-            Status(
-                if (game.toMove == Side.WHITE) "⚪" else "⚫",
-                "$name to move",
-                if (absolve.isNotEmpty()) {
-                    "A bishop can absolve " + absolve.joinToString { "${game.board[it]!!.kind.label} ${Rules.squareName(it)}" } + " – tap it."
-                } else if (game.log.isEmpty()) {
-                    "Play on the real board, then tap the piece and its square here."
-                } else {
-                    "Move ${game.fullmove}"
-                },
-                scheme.secondary,
-            )
-        }
+        else -> Status(
+            if (game.toMove == Side.WHITE) "⚪" else "⚫",
+            "$name to move",
+            turnDetail(game),
+            scheme.secondary,
+        )
     }
-    AnimatedContent(
-        targetState = status,
-        contentKey = { it.emoji + it.title },
-        transitionSpec = { (fadeIn(tween(250)) + slideInVertically { it / 4 }) togetherWith fadeOut(tween(150)) },
-        label = "status",
-    ) { s ->
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(18.dp))
-                .background(Brush.horizontalGradient(listOf(s.tone.copy(alpha = 0.3f), s.tone.copy(alpha = 0.06f))))
-                .border(1.dp, s.tone.copy(alpha = 0.55f), RoundedCornerShape(18.dp))
-                .padding(horizontal = 16.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(s.emoji, fontSize = 26.sp)
-            Spacer(Modifier.width(12.dp))
-            Column {
-                Text(s.title, style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                if (s.detail.isNotEmpty()) {
-                    Text(s.detail, style = MaterialTheme.typography.bodyMedium, color = scheme.onSurfaceVariant)
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        AnimatedContent(
+            targetState = status,
+            contentKey = { it.emoji + it.title },
+            transitionSpec = { (fadeIn(tween(250)) + slideInVertically { it / 4 }) togetherWith fadeOut(tween(150)) },
+            label = "status",
+            modifier = Modifier.weight(1f),
+        ) { st ->
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(Brush.horizontalGradient(listOf(st.tone.copy(alpha = 0.3f), st.tone.copy(alpha = 0.06f))))
+                    .border(1.dp, st.tone.copy(alpha = 0.55f), RoundedCornerShape(18.dp))
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(st.emoji, fontSize = 26.sp)
+                Spacer(Modifier.width(12.dp))
+                Column {
+                    Text(st.title, style = MaterialTheme.typography.titleLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    if (st.detail.isNotEmpty()) {
+                        Text(st.detail, style = MaterialTheme.typography.bodyMedium, color = scheme.onSurfaceVariant)
+                    }
                 }
             }
         }
+        if (game.hintsAllowed != 0 && result == null) {
+            Spacer(Modifier.width(8.dp))
+            HintButton(vm, game)
+        }
+    }
+}
+
+/** What to tell the player whose turn it is, per mode. */
+private fun turnDetail(game: GameState): String {
+    val absolve = Rules.legalAbsolutions(game)
+    if (absolve.isNotEmpty()) {
+        val verb = when (game.mode) {
+            Mode.PLAGUE -> "A bishop can cure"
+            Mode.CLASSIC -> "A bishop can forgive"
+            else -> "A bishop can absolve"
+        }
+        return "$verb " + absolve.joinToString {
+            if (Rules.absolverFor(game, it) == it) "itself on ${Rules.squareName(it)}" else "${game.board[it]!!.kind.label} ${Rules.squareName(it)}"
+        } + " – tap it."
+    }
+    if (game.mode == Mode.ANTICHESS && Rules.allLegalMoves(game).any { Rules.isCapture(game, it) }) return "A capture is possible, so you must take."
+    if (game.log.isEmpty()) return when (game.mode) {
+        Mode.CHESS960 -> "Set up the back ranks exactly as shown. To castle, tap the king, then the rook."
+        Mode.RACING_KINGS -> "Set up as shown. No checks allowed – race your king to the 8th rank."
+        Mode.KING_OF_THE_HILL -> "Get your king to a gold centre square to win."
+        else -> "Play on the real board, then tap the piece and its square here."
+    }
+    return when (game.mode) {
+        Mode.THREE_CHECK -> "Move ${game.fullmove} · checks ${game.whiteChecks}–${game.blackChecks}"
+        Mode.RACING_KINGS -> "Move ${game.fullmove} · no checks allowed"
+        else -> "Move ${game.fullmove}"
+    }
+}
+
+@Composable
+private fun HintButton(vm: GameViewModel, game: GameState) {
+    val left = game.hintsLeft(game.toMove)
+    val enabled = left > 0 && !vm.thinking && game.pendingRoll == null
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        FilledTonalIconButton(onClick = vm::requestHint, enabled = enabled, modifier = Modifier.size(52.dp)) {
+            if (vm.thinking) CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.5.dp)
+            else Icon(Icons.Default.Lightbulb, "Hint")
+        }
+        Text(
+            if (game.hintsAllowed < 0) "∞" else "$left left",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
@@ -531,8 +619,22 @@ private fun PieceCard(vm: GameViewModel, game: GameState) {
     val sq = vm.selected
     val p = sq?.let { game.board[it] }
     if (sq == null || p == null) {
-        // Nothing selected: a compact legend of the feelings in play.
-        val moods = if (game.mode == Mode.EMOTIONAL) listOf(Mood.UNAFFECTED, Mood.GUILTY, Mood.DEVASTATED, Mood.PSYCHOPATH) else listOf(Mood.GUILTY)
+        // Nothing selected: a compact legend of the feelings in play, or the mode's goal.
+        val moods = when (game.mode) {
+            Mode.EMOTIONAL -> listOf(Mood.UNAFFECTED, Mood.GUILTY, Mood.DEVASTATED, Mood.PSYCHOPATH)
+            Mode.CLASSIC -> listOf(Mood.GUILTY)
+            Mode.PLAGUE -> listOf(Mood.INFECTED, Mood.IMMUNE)
+            else -> emptyList()
+        }
+        if (moods.isEmpty()) {
+            Text(
+                "${game.mode.emoji}  ${game.mode.tagline}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = scheme.onSurfaceVariant,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+            )
+            return
+        }
         FlowRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -575,21 +677,47 @@ private fun PieceCard(vm: GameViewModel, game: GameState) {
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text("${p.name} · ${Rules.squareName(sq)}", style = MaterialTheme.typography.titleSmall, color = scheme.onSurfaceVariant)
-            val extra = if (p.mood == Mood.DEVASTATED) " · leaves in ${p.countdown}" else ""
-            Text(
-                "${moodEmoji(p.mood, game.mode)} ${Rules.moodLabel(p.mood, game.mode)}$extra",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-                color = moodColor(p.mood) ?: scheme.onSurface,
-            )
-            Text(Rules.moodDescription(p.mood, game.mode), style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
+            val extra = when (p.mood) {
+                Mood.DEVASTATED -> " · leaves in ${p.countdown}"
+                Mood.INFECTED -> " · dies in ${p.countdown}"
+                else -> ""
+            }
+            val feelings = game.mode == Mode.EMOTIONAL || game.mode == Mode.CLASSIC || game.mode == Mode.PLAGUE
+            if (feelings) {
+                Text(
+                    "${moodEmoji(p.mood, game.mode)} ${Rules.moodLabel(p.mood, game.mode)}$extra",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = moodColor(p.mood) ?: scheme.onSurface,
+                )
+                Text(Rules.moodDescription(p.mood, game.mode), style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
+            } else if (p.perks.isEmpty()) {
+                Text(
+                    if (game.mode == Mode.ROGUELIKE && p.kind != Kind.KING) "Capture with it to level up and pick a perk." else "Tap a highlighted square to move it.",
+                    style = MaterialTheme.typography.bodyMedium, color = scheme.onSurfaceVariant,
+                )
+            } else {
+                Text("⭐ ${p.perks.size} perk" + if (p.perks.size == 1) "" else "s", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = scheme.tertiary)
+            }
+            for (perk in p.perks) {
+                Text("${perk.emoji} ${perk.label}: ${perk.text}", style = MaterialTheme.typography.bodySmall)
+            }
         }
-        if (Rules.absolverFor(game, sq) != null) {
+        val healer = Rules.absolverFor(game, sq)
+        if (healer != null) {
             Spacer(Modifier.width(8.dp))
             FilledTonalButton(
                 onClick = vm::absolveSelected,
                 colors = ButtonDefaults.filledTonalButtonColors(containerColor = scheme.tertiary, contentColor = scheme.onTertiary),
-            ) { Text("✝ Absolve") }
+            ) {
+                Text(
+                    when (game.mode) {
+                        Mode.PLAGUE -> "💉 Cure"
+                        Mode.CLASSIC -> "✝ Forgive"
+                        else -> "✝ Absolve"
+                    } + if (healer == sq) " itself" else ""
+                )
+            }
         }
     }
 }
@@ -639,7 +767,7 @@ private fun PromotionDialog(moves: List<Move>, side: Side, onChoose: (Move?) -> 
         text = {
             Row(horizontalArrangement = Arrangement.SpaceEvenly, modifier = Modifier.fillMaxWidth()) {
                 for (m in moves) {
-                    PieceTile(m.promotion ?: Kind.QUEEN, side, 60.dp, Modifier.clickable { onChoose(m) })
+                    PieceTile(m.promotion ?: Kind.QUEEN, side, if (moves.size > 4) 46.dp else 60.dp, Modifier.clickable { onChoose(m) })
                 }
             }
         },
@@ -704,8 +832,17 @@ fun ReportCard(game: GameState, onNewGame: () -> Unit, onUndo: () -> Unit, onVie
                     Spacer(Modifier.height(4.dp))
                     val parts = buildList {
                         add("⚔️ $captures capture" + if (captures == 1) "" else "s")
-                        if (absolved > 0) add("✝️ $absolved " + if (game.mode == Mode.EMOTIONAL) "absolved" else "forgiven")
-                        if (despair > 0) add("💧 $despair lost to despair")
+                        if (game.mode == Mode.THREE_CHECK) add("⚡ ${game.checksBy(side)} checks")
+                        if (absolved > 0) add(
+                            when (game.mode) {
+                                Mode.PLAGUE -> "💉 $absolved cured"
+                                Mode.CLASSIC -> "✝️ $absolved forgiven"
+                                else -> "✝️ $absolved absolved"
+                            }
+                        )
+                        if (despair > 0) add(if (game.mode == Mode.PLAGUE) "☠️ $despair lost to plague" else "💧 $despair lost to despair")
+                        val perks = game.board.filterNotNull().filter { it.side == side }.sumOf { it.perks.size }
+                        if (perks > 0) add("⭐ $perks perks")
                     }
                     Text(parts.joinToString("   "), style = MaterialTheme.typography.bodyMedium)
                     if (rolls.isNotEmpty()) {
@@ -734,6 +871,59 @@ fun ReportCard(game: GameState, onNewGame: () -> Unit, onUndo: () -> Unit, onVie
     }
 }
 
+/** Roguelike level-up: the capturing piece picks one of three perks. */
+@Composable
+fun PerkCard(game: GameState, suggested: Perk?, onPick: (Perk) -> Unit, onHint: () -> Unit, thinking: Boolean) {
+    val scheme = MaterialTheme.colorScheme
+    val at = game.pendingPerk ?: return
+    val p = game.board[at] ?: return
+    Surface(
+        shape = RoundedCornerShape(28.dp),
+        color = scheme.surfaceContainerHigh,
+        modifier = Modifier.border(1.dp, scheme.tertiary.copy(alpha = 0.7f), RoundedCornerShape(28.dp)),
+    ) {
+        Column(
+            Modifier
+                .background(Brush.radialGradient(listOf(scheme.tertiary.copy(alpha = 0.22f), Color.Transparent), radius = 700f))
+                .verticalScroll(rememberScrollState())
+                .padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            PieceTile(p.kind, p.side, 72.dp)
+            Text("Level up!", style = MaterialTheme.typography.displaySmall, color = scheme.tertiary)
+            Text(
+                "${p.name} on ${Rules.squareName(at)} made a capture. Choose its new power:",
+                textAlign = TextAlign.Center, color = scheme.onSurfaceVariant,
+            )
+            for (perk in game.perkOffer) {
+                val best = perk == suggested
+                Surface(
+                    onClick = { onPick(perk) },
+                    shape = RoundedCornerShape(18.dp),
+                    color = scheme.surfaceContainer,
+                    contentColor = scheme.onSurface,
+                    border = BorderStroke(if (best) 2.dp else 1.dp, if (best) scheme.tertiary else scheme.outlineVariant),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(perk.emoji, fontSize = 28.sp)
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(perk.label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                            Text(perk.text, style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
+                        }
+                        if (best) Text("💡", fontSize = 20.sp)
+                    }
+                }
+            }
+            if (game.hintsAllowed != 0 && game.hintsLeft(game.toMove) > 0 && suggested == null) {
+                TextButton(onClick = onHint, enabled = !thinking) { Text(if (thinking) "Thinking…" else "💡 Which one should I pick?") }
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RulesSheet(mode: Mode, onDismiss: () -> Unit) {
@@ -745,35 +935,93 @@ fun RulesSheet(mode: Mode, onDismiss: () -> Unit) {
                 .padding(bottom = 32.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Text("How to play", style = MaterialTheme.typography.headlineMedium)
-            Text("Normal chess rules apply, with the changes below. Make each move on the real board, then tap the piece and its destination here.")
-            val emotional = @Composable {
-                Text("🎲 Emotional (dice)", style = MaterialTheme.typography.headlineSmall)
-                Text("The first time a piece captures, roll one die. Each piece rolls only once, ever.")
-                DieRule(listOf(1), Mood.DEVASTATED, "Frozen and gives no check. Unless absolved, it leaves the board at the end of its owner's third following turn (the badge counts down). A despairing king loses the game, and so does a departure that exposes your own king.")
-                DieRule(listOf(2, 3), Mood.GUILTY, "Moves normally but cannot capture or give check until absolved.")
-                DieRule(listOf(4, 5), Mood.UNAFFECTED, "Nothing happens.")
-                DieRule(listOf(6), Mood.PSYCHOPATH, "Permanent. Every later capture earns one mandatory extra move with the same piece. A capture made on that extra move earns nothing more. If the extra move can take the enemy king, it wins.")
-                Bullet("✝️ Absolution takes your whole turn: a friendly bishop (not devastated) on one of the 8 squares around a guilt-ridden or devastated piece absolves it. Tap the piece, then Absolve. Not allowed while in check, during a bonus move, or on itself.")
-                Bullet("👑 Win by checkmate, by a psychopath taking the king, or by a despairing king. Draws: stalemate, threefold repetition, 50-move rule, or only kings left.")
-            }
-            val classic = @Composable {
-                Text("✝️ Classic Remorse", style = MaterialTheme.typography.headlineSmall)
-                Bullet("😔 A piece that captures becomes remorseful.")
-                Bullet("A remorseful piece can move and block, but cannot capture – so it gives no check. A king may walk onto squares it only 'attacks'.")
-                Bullet("A friendly bishop that moves onto one of the 8 squares around it forgives it. The piece walking up to a bishop does not count, and a bishop never forgives itself.")
-                Bullet("Promotion keeps the remorse.")
-            }
-            HorizontalDivider()
-            if (mode == Mode.EMOTIONAL) emotional() else classic()
-            HorizontalDivider()
-            if (mode == Mode.EMOTIONAL) classic() else emotional()
-            HorizontalDivider()
+            Text("${mode.emoji} ${mode.title}", style = MaterialTheme.typography.headlineMedium)
             Text(
-                "Rules follow the published Remorse Chess descriptions (nabous.dev; remorsechess.com dice rules). Sources differ on small points; this app uses the remorsechess.com version for the dice game.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                if (mode == Mode.STANDARD) "Normal chess. Make each move on the real board, then tap the piece and its destination here."
+                else "Normal chess rules apply, with the changes below. Make each move on the real board, then tap the piece and its destination here.",
             )
+            HorizontalDivider()
+            ModeRules(mode)
+            HorizontalDivider()
+            Text("Other modes", style = MaterialTheme.typography.titleMedium)
+            for (m in Mode.entries.filter { it != mode }) {
+                Text("${m.emoji} ${m.title} – ${m.tagline}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            if (mode == Mode.EMOTIONAL || mode == Mode.CLASSIC) {
+                Text(
+                    "Remorse rules follow nabous.dev (classic) and remorsechess.com (dice). House rule: a bishop can heal itself.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ModeRules(mode: Mode) {
+    when (mode) {
+        Mode.STANDARD -> {
+            Bullet("👑 Checkmate wins. Stalemate, threefold repetition, the 50-move rule and bare kings are draws.")
+            Bullet("💡 Stuck? The hint button suggests a move (if hints are on).")
+        }
+        Mode.CHESS960 -> {
+            Bullet("The back rank is shuffled: bishops on opposite colours, the king somewhere between the rooks. Black mirrors White. Set up your board as the app shows.")
+            Bullet("Castling ends with the king on g1/c1 and the rook on f1/d1 (g8/c8 and f8/d8 for Black). The squares in between must be empty and the king may not pass through check.")
+            Bullet("To castle here, tap the king, then the rook.")
+        }
+        Mode.KING_OF_THE_HILL -> {
+            Bullet("⛰️ Move your king onto d4, e4, d5 or e5 (marked in gold) and you win at once.")
+            Bullet("Checkmate still wins too.")
+        }
+        Mode.THREE_CHECK -> {
+            Bullet("⚡ The third check you give wins the game. The player bars count them.")
+            Bullet("Checkmate still wins too.")
+        }
+        Mode.ATOMIC -> {
+            Bullet("💥 A capture explodes: the capturing piece, the captured piece and every piece on the 8 squares around them leave the board – except pawns, which only go if they capture or are captured.")
+            Bullet("Kings cannot capture.")
+            Bullet("Blowing up the enemy king wins. A move that would blow up your own king is illegal.")
+            Bullet("While the two kings touch, neither of them can be in check.")
+        }
+        Mode.ANTICHESS -> {
+            Bullet("🙃 If you can capture, you must (you choose which capture).")
+            Bullet("There is no check. The king is an ordinary piece and can be captured; pawns may promote to a king. No castling.")
+            Bullet("Win by losing all your pieces, or by having no legal move.")
+        }
+        Mode.RACING_KINGS -> {
+            Bullet("🏁 No pawns. All pieces start on the first two ranks as shown; no castling.")
+            Bullet("Giving check is not allowed, and neither is moving into check.")
+            Bullet("The first king on the 8th rank (marked in gold) wins. If White gets there first and Black can reach it on the very next move, it is a draw.")
+        }
+        Mode.EMOTIONAL -> {
+            Text("The first time a piece captures, roll one die. Each piece rolls only once, ever.")
+            DieRule(listOf(1), Mood.DEVASTATED, "Frozen and gives no check. Unless absolved, it leaves the board at the end of its owner's third following turn (the badge counts down). A despairing king loses the game, and so does a departure that exposes your own king.")
+            DieRule(listOf(2, 3), Mood.GUILTY, "Moves normally but cannot capture or give check until absolved.")
+            DieRule(listOf(4, 5), Mood.UNAFFECTED, "Nothing happens.")
+            DieRule(listOf(6), Mood.PSYCHOPATH, "Permanent. Every later capture earns one mandatory extra move with the same piece. A capture made on that extra move earns nothing more. If the extra move can take the enemy king, it wins.")
+            Bullet("✝️ Absolution takes your whole turn: a friendly bishop (not devastated) on one of the 8 squares around a guilt-ridden or devastated piece absolves it. A guilt-ridden or devastated bishop can absolve itself. Tap the piece, then Absolve. Not allowed while in check or during a bonus move.")
+            Bullet("👑 Win by checkmate, by a psychopath taking the king, or by a despairing king. Draws: stalemate, threefold repetition, 50-move rule, or only kings left.")
+        }
+        Mode.CLASSIC -> {
+            Bullet("😔 A piece that captures becomes remorseful.")
+            Bullet("A remorseful piece can move and block, but cannot capture – so it gives no check. A king may walk onto squares it only 'attacks'.")
+            Bullet("A friendly bishop that moves onto one of the 8 squares around it forgives it. The piece walking up to a bishop does not count.")
+            Bullet("A remorseful bishop can forgive itself; that takes its whole turn. Tap it, then Forgive.")
+            Bullet("Promotion keeps the remorse.")
+        }
+        Mode.PLAGUE -> {
+            Bullet("🤢 A piece that captures catches the plague from its victim. The badge counts down its owner's turns.")
+            Bullet("🦠 When an infected piece moves, every healthy piece next to its new square catches it too – friend or foe.")
+            Bullet("☠️ An infected piece dies at the end of its owner's ${Rules.INCUBATION_TURNS}th turn after catching it. If that is the king, its owner loses.")
+            Bullet("💉 A bishop next to an infected friend can spend the turn curing it. Cured pieces are immune (💪) for good. Not allowed while in check.")
+            Bullet("Bishops are doctors and never fall ill.")
+        }
+        Mode.ROGUELIKE -> {
+            Bullet("⭐ When a piece other than the king captures, it levels up: pick one of three perks.")
+            for (perk in Perk.entries) Bullet("${perk.emoji} ${perk.label}: ${perk.text}")
+            Bullet("Perks stack, survive promotion, and count for check: a rook that can leap gives check like a knight.")
+            Bullet("The app remembers every perk for you. Tap a piece to see its perks.")
         }
     }
 }

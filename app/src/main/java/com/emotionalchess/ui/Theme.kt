@@ -84,6 +84,8 @@ fun moodColor(mood: Mood): Color? = when (mood) {
     Mood.GUILTY -> Color(0xFFFF8A3D)
     Mood.DEVASTATED -> Color(0xFF4DA3FF)
     Mood.PSYCHOPATH -> Color(0xFFC04DFF)
+    Mood.INFECTED -> Color(0xFF9BD53A)
+    Mood.IMMUNE -> Color(0xFF3CCFCF)
 }
 
 fun moodEmoji(mood: Mood, mode: Mode): String = when (mood) {
@@ -92,4 +94,6 @@ fun moodEmoji(mood: Mood, mode: Mode): String = when (mood) {
     Mood.GUILTY -> if (mode == Mode.EMOTIONAL) "😰" else "😔"
     Mood.DEVASTATED -> "😭"
     Mood.PSYCHOPATH -> "😈"
+    Mood.INFECTED -> "🤢"
+    Mood.IMMUNE -> "💪"
 }

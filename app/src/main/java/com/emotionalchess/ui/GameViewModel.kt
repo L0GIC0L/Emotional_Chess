@@ -4,19 +4,24 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
+import com.emotionalchess.engine.Engine
 import com.emotionalchess.engine.GameState
+import com.emotionalchess.engine.Hint
 import com.emotionalchess.engine.History
 import com.emotionalchess.engine.Kind
 import com.emotionalchess.engine.Mode
 import com.emotionalchess.engine.Mood
 import com.emotionalchess.engine.Move
+import com.emotionalchess.engine.Perk
 import com.emotionalchess.engine.Rules
 import com.emotionalchess.engine.Side
 import com.emotionalchess.engine.Snapshot
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -95,6 +100,15 @@ class GameViewModel(private val store: GameStore) : ViewModel() {
         private set
     private var feedbackSeq = 0L
 
+    /** The latest hint, shown until the position changes. */
+    var hint by mutableStateOf<Hint?>(null)
+        private set
+    var thinking by mutableStateOf(false)
+        private set
+    private val hintScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private var hintJob: Job? = null
+    private var hintRequest = 0L
+
     init {
         store.load()?.let { data ->
             game = data.game
@@ -115,8 +129,9 @@ class GameViewModel(private val store: GameStore) : ViewModel() {
 
     // ----------------------------------------------------------- actions
 
-    fun newGame(mode: Mode, white: String, black: String) {
-        game = Rules.newGame(mode, white, black)
+    fun newGame(mode: Mode, white: String, black: String, hints: Int = 3) {
+        clearHint()
+        game = Rules.newGame(mode, white, black, hints = hints)
         undoStack = emptyList()
         selected = null
         flipped = false
@@ -126,6 +141,7 @@ class GameViewModel(private val store: GameStore) : ViewModel() {
     }
 
     fun closeGame() {
+        clearHint()
         game = null
         undoStack = emptyList()
         selected = null
@@ -135,13 +151,14 @@ class GameViewModel(private val store: GameStore) : ViewModel() {
 
     fun onSquareTapped(sq: Int) {
         val g = game ?: return
-        if (g.result != null || g.pendingRoll != null) return
+        if (g.result != null || g.pendingRoll != null || g.pendingPerk != null) return
         val sel = selected
         if (sel != null) {
-            val moves = Rules.legalMovesFrom(g, sel).filter { it.to == sq }
+            // Castling can also be entered by tapping the rook (needed in Chess960).
+            val moves = Rules.legalMovesFrom(g, sel).filter { it.to == sq || (it.castle && it.rookFrom == sq) }
             when {
-                moves.size > 1 -> { promotionChoices = moves; return }
-                moves.size == 1 -> { commit(Rules.play(g, moves.first())); return }
+                moves.size > 1 && moves.all { it.promotion != null } -> { promotionChoices = moves; return }
+                moves.isNotEmpty() -> { commit(Rules.play(g, moves.first())); return }
             }
         }
         val p = g.board[sq]
@@ -172,6 +189,42 @@ class GameViewModel(private val store: GameStore) : ViewModel() {
 
     fun dismissRoll() { rollReveal = null }
 
+    fun choosePerk(perk: Perk) {
+        val g = game ?: return
+        if (g.pendingPerk == null || perk !in g.perkOffer) return
+        commit(Rules.choosePerk(g, perk))
+    }
+
+    /** Thinks in the background; counts against the player's hints only when one is found. */
+    fun requestHint() {
+        val g = game ?: return
+        if (thinking || g.result != null || g.pendingRoll != null || g.hintsLeft(g.toMove) <= 0) return
+        thinking = true
+        val request = ++hintRequest
+        hintJob = hintScope.launch {
+            val found = runCatching { Engine.bestAction(g, budgetMs = HINT_MS) }.getOrNull()
+            // Ignore a search that finished after the position changed or the hint was cleared.
+            if (request != hintRequest) return@launch
+            thinking = false
+            if (game !== g || found == null) return@launch
+            hint = found
+            game = if (g.toMove == Side.WHITE) g.copy(whiteHints = g.whiteHints + 1) else g.copy(blackHints = g.blackHints + 1)
+            persist()
+        }
+    }
+
+    fun clearHint() {
+        hintRequest++
+        hintJob?.cancel()
+        hintJob = null
+        hint = null
+        thinking = false
+    }
+
+    override fun onCleared() {
+        hintScope.cancel()
+    }
+
     fun resign(side: Side) { game?.let { commit(Rules.resign(it, side)) } }
 
     fun agreeDraw() { game?.let { commit(Rules.agreeDraw(it)) } }
@@ -180,6 +233,7 @@ class GameViewModel(private val store: GameStore) : ViewModel() {
 
     fun undo() {
         if (undoStack.isEmpty()) return
+        clearHint()
         game = undoStack.last()
         undoStack = undoStack.dropLast(1)
         selected = game?.bonusSquare
@@ -194,6 +248,7 @@ class GameViewModel(private val store: GameStore) : ViewModel() {
     }
 
     private fun commit(next: GameState, haptics: Boolean = true) {
+        clearHint()
         val before = game
         before?.let { undoStack = (undoStack + it).takeLast(MAX_UNDO) }
         game = next
@@ -218,5 +273,6 @@ class GameViewModel(private val store: GameStore) : ViewModel() {
 
     private companion object {
         const val MAX_UNDO = 150
+        const val HINT_MS = 1800L
     }
 }

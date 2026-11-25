@@ -80,6 +80,7 @@ class GameViewModelTest {
         val file = File(dir, "game.json")
         val vm = GameViewModel(FileGameStore(file))
         vm.newGame(Mode.CLASSIC, "Ada", "Grace")
+        val initial = vm.game!!
         vm.tap("e2", "e4"); vm.tap("d7", "d5"); vm.tap("e4", "d5")
         vm.flip()
 
@@ -95,7 +96,7 @@ class GameViewModelTest {
         assertEquals(expected, restored.game)
         assertTrue(restored.flipped)
         restored.undo(); restored.undo(); restored.undo()
-        assertEquals(Rules.newGame(Mode.CLASSIC, "Ada", "Grace"), restored.game)
+        assertEquals(initial, restored.game)
         assertFalse(restored.canUndo)
         dir.deleteRecursively()
     }
@@ -112,5 +113,62 @@ class GameViewModelTest {
         vm.undo()
         assertEquals(start, vm.game)
         dir.deleteRecursively()
+    }
+
+    private fun GameViewModel.awaitHint() {
+        val deadline = System.currentTimeMillis() + 10_000
+        while (thinking && System.currentTimeMillis() < deadline) Thread.sleep(10)
+    }
+
+    @Test
+    fun hintsAreFoundAndCounted() {
+        val vm = GameViewModel(MemoryStore())
+        vm.newGame(Mode.STANDARD, "", "", hints = 1)
+        vm.requestHint()
+        vm.awaitHint()
+        assertNotNull(vm.hint)
+        assertEquals(1, vm.game!!.whiteHints)
+        assertEquals(0, vm.game!!.hintsLeft(Side.WHITE))
+
+        vm.requestHint() // none left
+        assertFalse(vm.thinking)
+
+        val m = (vm.hint!!.action as com.emotionalchess.engine.Action.Play).move
+        vm.onSquareTapped(m.from); vm.onSquareTapped(m.to)
+        assertNull("a move clears the hint", vm.hint)
+        assertEquals(Side.BLACK, vm.game!!.toMove)
+    }
+
+    @Test
+    fun hintsOffMeansNoHints() {
+        val vm = GameViewModel(MemoryStore())
+        vm.newGame(Mode.STANDARD, "", "", hints = 0)
+        vm.requestHint()
+        assertFalse(vm.thinking)
+        assertNull(vm.hint)
+    }
+
+    @Test
+    fun chess960CastlesByTappingTheRook() {
+        val board = MutableList<com.emotionalchess.engine.Piece?>(64) { null }
+        board[sq("g1")] = com.emotionalchess.engine.Piece(Side.WHITE, com.emotionalchess.engine.Kind.KING, id = 1)
+        board[sq("h1")] = com.emotionalchess.engine.Piece(Side.WHITE, com.emotionalchess.engine.Kind.ROOK, id = 2)
+        board[sq("g8")] = com.emotionalchess.engine.Piece(Side.BLACK, com.emotionalchess.engine.Kind.KING, id = 3)
+        val vm = GameViewModel(MemoryStore(SaveData(game = GameState(Mode.CHESS960, board = board))))
+        vm.tap("g1", "h1")
+        assertEquals(com.emotionalchess.engine.Kind.ROOK, vm.game!!.board[sq("f1")]?.kind)
+        assertEquals(com.emotionalchess.engine.Kind.KING, vm.game!!.board[sq("g1")]?.kind)
+    }
+
+    @Test
+    fun roguelikePerkPick() {
+        val vm = GameViewModel(MemoryStore())
+        vm.newGame(Mode.ROGUELIKE, "", "")
+        vm.tap("e2", "e4"); vm.tap("d7", "d5"); vm.tap("e4", "d5")
+        val offer = vm.game!!.perkOffer
+        assertEquals(3, offer.size)
+        vm.choosePerk(offer[1])
+        assertEquals(listOf(offer[1]), vm.game!!.board[sq("d5")]!!.perks)
+        assertNull(vm.game!!.pendingPerk)
     }
 }
