@@ -2,6 +2,7 @@ package com.emotionalchess.ui
 
 import android.os.Build
 import android.view.HapticFeedbackConstants
+import android.view.View
 import androidx.activity.compose.LocalActivityResultRegistryOwner
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -18,22 +19,24 @@ import com.emotionalchess.R
 import com.emotionalchess.net.NearbyPeerLink
 import java.io.File
 
+private class ViewHaptics(private val view: View) : Haptics {
+    override fun buzz(kind: Buzz) {
+        view.performHapticFeedback(
+            when (kind) {
+                Buzz.TICK -> HapticFeedbackConstants.CLOCK_TICK
+                Buzz.CLICK -> HapticFeedbackConstants.VIRTUAL_KEY
+                Buzz.HEAVY -> HapticFeedbackConstants.LONG_PRESS
+                Buzz.CONFIRM ->
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) HapticFeedbackConstants.CONFIRM else HapticFeedbackConstants.LONG_PRESS
+            }
+        )
+    }
+}
+
 @Composable
 actual fun rememberHaptics(): Haptics {
     val view = LocalView.current
-    return remember(view) {
-        Haptics { kind ->
-            view.performHapticFeedback(
-                when (kind) {
-                    Buzz.TICK -> HapticFeedbackConstants.CLOCK_TICK
-                    Buzz.CLICK -> HapticFeedbackConstants.VIRTUAL_KEY
-                    Buzz.HEAVY -> HapticFeedbackConstants.LONG_PRESS
-                    Buzz.CONFIRM ->
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) HapticFeedbackConstants.CONFIRM else HapticFeedbackConstants.LONG_PRESS
-                }
-            )
-        }
-    }
+    return remember(view) { ViewHaptics(view) }
 }
 
 private class AndroidLinkPermission(private val request: ((Boolean) -> Unit) -> Unit) : LinkPermission {
