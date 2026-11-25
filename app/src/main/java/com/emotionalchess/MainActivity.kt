@@ -13,6 +13,7 @@ import com.emotionalchess.ui.App
 import com.emotionalchess.ui.EmotionalChessTheme
 import com.emotionalchess.ui.FileGameStore
 import com.emotionalchess.ui.GameViewModel
+import com.emotionalchess.net.NearbyPeerLink
 import java.io.File
 
 class MainActivity : ComponentActivity() {
@@ -32,7 +33,10 @@ class MainActivity : ComponentActivity() {
             }
             EmotionalChessTheme {
                 val vm: GameViewModel = viewModel {
-                    GameViewModel(FileGameStore(File(applicationContext.filesDir, "game.json")))
+                    GameViewModel(
+                        FileGameStore(File(applicationContext.filesDir, "game.json")),
+                        linkFactory = { NearbyPeerLink(applicationContext) },
+                    )
                 }
                 App(vm)
             }

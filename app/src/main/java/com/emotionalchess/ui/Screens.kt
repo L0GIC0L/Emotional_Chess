@@ -67,6 +67,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
@@ -88,6 +89,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -110,13 +112,26 @@ import com.emotionalchess.engine.Mood
 import com.emotionalchess.engine.Move
 import com.emotionalchess.engine.Rules
 import com.emotionalchess.engine.Side
+import com.emotionalchess.net.NearbyPeerLink
+import androidx.activity.compose.LocalActivityResultRegistryOwner
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 
 @Composable
 fun App(vm: GameViewModel) {
     Box(Modifier.fillMaxSize().background(BackdropBrush)) {
-        Crossfade(targetState = vm.game == null, animationSpec = tween(400), label = "screen") { setup ->
+        val screen = when {
+            vm.game != null -> 2
+            vm.online != null -> 1
+            else -> 0
+        }
+        Crossfade(targetState = screen, animationSpec = tween(400), label = "screen") { which ->
             val game = vm.game
-            if (setup || game == null) NewGameScreen(onStart = vm::newGame) else GameScreen(vm, game)
+            when {
+                which == 2 && game != null -> GameScreen(vm, game)
+                which == 1 && vm.online != null -> LobbyScreen(vm)
+                else -> NewGameScreen(onStart = vm::newGame, onHost = vm::hostGame, onJoin = vm::joinGame)
+            }
         }
     }
 }
@@ -124,12 +139,21 @@ fun App(vm: GameViewModel) {
 // ======================================================================= new game
 
 @Composable
-fun NewGameScreen(onStart: (Mode, String, String, Int) -> Unit) {
+fun NewGameScreen(
+    onStart: (Mode, String, String, Int) -> Unit,
+    onHost: (Mode, String, Int, Side?) -> Unit = { _, _, _, _ -> },
+    onJoin: (String) -> Unit = {},
+    startWithTwoPhones: Boolean = false,
+) {
     var mode by rememberSaveable { mutableStateOf(Mode.STANDARD) }
     var white by rememberSaveable { mutableStateOf("") }
     var black by rememberSaveable { mutableStateOf("") }
     var hints by rememberSaveable { mutableIntStateOf(3) }
+    var twoPhones by rememberSaveable { mutableStateOf(startWithTwoPhones) }
+    var myName by rememberSaveable { mutableStateOf("") }
+    var mySide by rememberSaveable { mutableStateOf<Side?>(Side.WHITE) }
     var showRules by remember { mutableStateOf(false) }
+    val nearby = rememberNearbyPermission()
 
     Column(Modifier.fillMaxSize().systemBarsPadding().imePadding(), horizontalAlignment = Alignment.CenterHorizontally) {
         Column(
@@ -150,21 +174,53 @@ fun NewGameScreen(onStart: (Mode, String, String, Int) -> Unit) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
             )
+            SectionLabel("Play on")
+            Choice(listOf(false to "📱 One phone", true to "📱📱 Two phones"), twoPhones) { twoPhones = it }
+            if (twoPhones) {
+                Text(
+                    "Each player uses their own phone, linked over Bluetooth / Wi-Fi in the same room. No account needed.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
             for (group in ModeGroup.entries) {
                 SectionLabel(group.title)
                 for (m in Mode.entries.filter { it.group == group }) ModeRow(m, mode == m) { mode = m }
             }
-            SectionLabel("Players")
-            PlayerField(white, { white = it }, Side.WHITE, ImeAction.Next)
-            PlayerField(black, { black = it }, Side.BLACK, ImeAction.Done)
+            if (twoPhones) {
+                SectionLabel("You")
+                OutlinedTextField(
+                    myName, { myName = it },
+                    label = { Text("Your name") },
+                    singleLine = true,
+                    shape = RoundedCornerShape(16.dp),
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Done),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Choice(listOf(Side.WHITE to "⚪ White", Side.BLACK to "⚫ Black", null to "🎲 Random"), mySide) { mySide = it }
+            } else {
+                SectionLabel("Players")
+                PlayerField(white, { white = it }, Side.WHITE, ImeAction.Next)
+                PlayerField(black, { black = it }, Side.BLACK, ImeAction.Done)
+            }
             SectionLabel("Hints")
             HintChoice(hints) { hints = it }
+            nearby.denied?.let { Text("⚠️ $it", color = MaterialTheme.colorScheme.error) }
         }
         Column(
             Modifier.widthIn(max = 560.dp).padding(horizontal = 22.dp).padding(top = 8.dp, bottom = 4.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            GlowButton("Begin · ${mode.emoji} ${mode.title}") { onStart(mode, white.trim(), black.trim(), hints) }
+            if (twoPhones) {
+                GlowButton("Host · ${mode.emoji} ${mode.title}") { nearby.run { onHost(mode, myName.trim(), hints, mySide) } }
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(onClick = { nearby.run { onJoin(myName.trim()) } }, modifier = Modifier.fillMaxWidth().height(50.dp)) {
+                    Text("Join a friend's game", fontSize = 16.sp)
+                }
+            } else {
+                GlowButton("Begin · ${mode.emoji} ${mode.title}") { onStart(mode, white.trim(), black.trim(), hints) }
+            }
             TextButton(onClick = { showRules = true }) {
                 Icon(Icons.AutoMirrored.Filled.MenuBook, null)
                 Spacer(Modifier.width(8.dp))
@@ -173,6 +229,47 @@ fun NewGameScreen(onStart: (Mode, String, String, Int) -> Unit) {
         }
     }
     if (showRules) RulesSheet(mode) { showRules = false }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun <T> Choice(options: List<Pair<T, String>>, value: T, onChange: (T) -> Unit) {
+    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+        options.forEachIndexed { i, (v, label) ->
+            SegmentedButton(
+                selected = value == v,
+                onClick = { onChange(v) },
+                shape = SegmentedButtonDefaults.itemShape(i, options.size),
+            ) { Text(label, maxLines = 1) }
+        }
+    }
+}
+
+/** Asks for the Nearby permissions before running a two-phone action. */
+private class NearbyPermission(private val request: ((Boolean) -> Unit) -> Unit) {
+    var denied by mutableStateOf<String?>(null)
+    fun run(action: () -> Unit) = request { granted ->
+        if (granted) { denied = null; action() } else denied = "Two-phone play needs the Nearby devices permission."
+    }
+}
+
+@Composable
+private fun rememberNearbyPermission(): NearbyPermission {
+    val context = LocalContext.current
+    var pending by remember { mutableStateOf<((Boolean) -> Unit)?>(null) }
+    // Previews and screenshot tests have no activity to ask through; there we just go ahead.
+    val launcher = if (LocalActivityResultRegistryOwner.current != null) {
+        rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
+            pending?.invoke(result.values.all { it })
+            pending = null
+        }
+    } else null
+    return remember(launcher) {
+        NearbyPermission { done ->
+            if (launcher == null || NearbyPeerLink.hasPermissions(context)) done(true)
+            else { pending = done; launcher.launch(NearbyPeerLink.permissions()) }
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -332,18 +429,39 @@ fun GameScreen(vm: GameViewModel, game: GameState) {
                     )
                 },
                 actions = {
-                    IconButton(onClick = vm::undo, enabled = vm.canUndo) { Icon(Icons.AutoMirrored.Filled.Undo, "Undo") }
+                    if (vm.online == null) IconButton(onClick = vm::undo, enabled = vm.canUndo) { Icon(Icons.AutoMirrored.Filled.Undo, "Undo") }
                     IconButton(onClick = vm::flip) { Icon(Icons.Default.SwapVert, "Flip board") }
                     IconButton(onClick = { showRules = true }) { Icon(Icons.AutoMirrored.Filled.MenuBook, "Rules") }
                     Box {
                         IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, "More") }
                         DropdownMenu(menu, { menu = false }) {
-                            DropdownMenuItem(
-                                text = { Text("Resign / draw…") },
-                                leadingIcon = { Icon(Icons.Default.Flag, null) },
-                                enabled = game.result == null,
-                                onClick = { menu = false; confirmResign = true },
-                            )
+                            val online = vm.online
+                            if (online != null) {
+                                DropdownMenuItem(
+                                    text = { Text("Offer a draw") },
+                                    leadingIcon = { Text("🤝") },
+                                    enabled = game.result == null && online.phase == LinkPhase.PLAYING,
+                                    onClick = { menu = false; vm.offerDraw() },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Resign") },
+                                    leadingIcon = { Icon(Icons.Default.Flag, null) },
+                                    enabled = game.result == null && online.phase == LinkPhase.PLAYING,
+                                    onClick = { menu = false; confirmResign = true },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Unlink – keep playing on this phone") },
+                                    leadingIcon = { Text("📴") },
+                                    onClick = { menu = false; vm.leaveOnline() },
+                                )
+                            } else {
+                                DropdownMenuItem(
+                                    text = { Text("Resign / draw…") },
+                                    leadingIcon = { Icon(Icons.Default.Flag, null) },
+                                    enabled = game.result == null,
+                                    onClick = { menu = false; confirmResign = true },
+                                )
+                            }
                             DropdownMenuItem(
                                 text = { Text("New game") },
                                 leadingIcon = { Icon(Icons.Default.Refresh, null) },
@@ -392,16 +510,17 @@ fun GameScreen(vm: GameViewModel, game: GameState) {
     }
 
     // ---------------- dialogs
-    if (game.pendingRoll != null || vm.rollReveal != null) DiceDialog(game, vm.rollReveal, vm::roll, vm::dismissRoll)
+    val mine = vm.myTurn(game)
+    if ((game.pendingRoll != null && mine) || vm.rollReveal != null) DiceDialog(game, vm.rollReveal, vm::roll, vm::dismissRoll)
     vm.promotionChoices?.let { PromotionDialog(it, game.toMove, vm::choosePromotion) }
-    if (game.pendingPerk != null) {
+    if (game.pendingPerk != null && mine) {
         Dialog(onDismissRequest = {}, properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false)) {
             PerkCard(game, suggested = (vm.hint?.action as? Action.Pick)?.perk, onPick = vm::choosePerk, onHint = vm::requestHint, thinking = vm.thinking)
         }
     }
     if (game.result != null && vm.showResult && vm.rollReveal == null) {
         Dialog(onDismissRequest = vm::dismissResult) {
-            ReportCard(game, onNewGame = vm::closeGame, onUndo = vm::undo, onViewBoard = vm::dismissResult)
+            ReportCard(game, onNewGame = vm::closeGame, onUndo = if (vm.online == null) vm::undo else null, onViewBoard = vm::dismissResult)
         }
     }
     if (confirmNew) AlertDialog(
@@ -411,7 +530,27 @@ fun GameScreen(vm: GameViewModel, game: GameState) {
         confirmButton = { Button(onClick = { confirmNew = false; vm.closeGame() }) { Text("New game") } },
         dismissButton = { TextButton(onClick = { confirmNew = false }) { Text("Cancel") } },
     )
-    if (confirmResign) AlertDialog(
+    val online = vm.online
+    if (confirmResign && online != null) AlertDialog(
+        onDismissRequest = { confirmResign = false },
+        title = { Text("Resign?") },
+        text = { Text("${online.peerName ?: "Your friend"} wins the game.") },
+        confirmButton = { Button(onClick = { confirmResign = false; online.mySide?.let(vm::resign) }) { Text("Resign") } },
+        dismissButton = { TextButton(onClick = { confirmResign = false }) { Text("Cancel") } },
+    )
+    if (online?.drawOffered == true) AlertDialog(
+        onDismissRequest = {},
+        title = { Text("🤝 ${online.peerName ?: "Your friend"} offers a draw") },
+        confirmButton = { Button(onClick = { vm.answerDraw(true) }) { Text("Accept") } },
+        dismissButton = { TextButton(onClick = { vm.answerDraw(false) }) { Text("Play on") } },
+    )
+    val notice = online?.notice ?: online?.error
+    if (notice != null) AlertDialog(
+        onDismissRequest = vm::dismissNotice,
+        text = { Text(notice) },
+        confirmButton = { TextButton(onClick = vm::dismissNotice) { Text("OK") } },
+    )
+    if (confirmResign && online == null) AlertDialog(
         onDismissRequest = { confirmResign = false },
         title = { Text("End the game") },
         text = { Text("Record a resignation or an agreed draw.") },
@@ -508,18 +647,25 @@ private fun StatusBanner(vm: GameViewModel, game: GameState) {
     val name = game.playerName(game.toMove)
     val result = game.result
     val hint = vm.hint
+    val online = vm.online
+    val mine = vm.myTurn(game)
     val status = when {
         result != null -> Status(
             if (result.winner != null) "👑" else "🤝",
             result.winner?.let { "${game.playerName(it)} wins" } ?: "Draw",
             result.reason, scheme.tertiary,
         )
+        online?.phase == LinkPhase.LOST -> Status(
+            "📡", "Connection lost",
+            "Looking for ${online.peerName ?: "your friend"}'s phone. Keep both apps open, with Bluetooth and Wi-Fi on.", scheme.error,
+        )
         game.pendingRoll != null -> Status(
-            "🎲", "Roll the die",
+            "🎲", if (mine) "Roll the die" else "$name is rolling",
             "${game.board[game.pendingRoll]?.name} made its first capture.", scheme.tertiary,
         )
         game.pendingPerk != null -> Status(
-            "⭐", "Level up!", "Pick a perk for the ${game.board[game.pendingPerk]?.kind?.label?.lowercase()}.", scheme.tertiary,
+            "⭐", if (mine) "Level up!" else "$name is levelling up",
+            "${if (mine) "Pick" else "Picking"} a perk for the ${game.board[game.pendingPerk]?.kind?.label?.lowercase()}.", scheme.tertiary,
         )
         hint != null -> Status("💡", hint.text, "Hint for $name – shown on the board.", scheme.tertiary)
         game.bonusSquare != null -> Status(
@@ -527,43 +673,55 @@ private fun StatusBanner(vm: GameViewModel, game: GameState) {
             "The psychopath on ${Rules.squareName(game.bonusSquare)} must move again.", moodColor(Mood.PSYCHOPATH)!!,
         )
         Rules.inCheck(game) -> Status("⚔️", "Check!", "$name must protect the king.", scheme.error)
-        else -> Status(
+        online != null && !mine -> Status(
             if (game.toMove == Side.WHITE) "⚪" else "⚫",
             "$name to move",
+            "Waiting for their move on their phone…",
+            scheme.secondary,
+        )
+        else -> Status(
+            if (game.toMove == Side.WHITE) "⚪" else "⚫",
+            if (online != null) "Your move" else "$name to move",
             turnDetail(game),
             scheme.secondary,
         )
     }
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        AnimatedContent(
-            targetState = status,
-            contentKey = { it.emoji + it.title },
-            transitionSpec = { (fadeIn(tween(250)) + slideInVertically { it / 4 }) togetherWith fadeOut(tween(150)) },
-            label = "status",
-            modifier = Modifier.weight(1f),
-        ) { st ->
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(Brush.horizontalGradient(listOf(st.tone.copy(alpha = 0.3f), st.tone.copy(alpha = 0.06f))))
-                    .border(1.dp, st.tone.copy(alpha = 0.55f), RoundedCornerShape(18.dp))
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(st.emoji, fontSize = 26.sp)
-                Spacer(Modifier.width(12.dp))
-                Column {
-                    Text(st.title, style = MaterialTheme.typography.titleLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    if (st.detail.isNotEmpty()) {
-                        Text(st.detail, style = MaterialTheme.typography.bodyMedium, color = scheme.onSurfaceVariant)
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            AnimatedContent(
+                targetState = status,
+                contentKey = { it.emoji + it.title },
+                transitionSpec = { (fadeIn(tween(250)) + slideInVertically { it / 4 }) togetherWith fadeOut(tween(150)) },
+                label = "status",
+                modifier = Modifier.weight(1f),
+            ) { st ->
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(Brush.horizontalGradient(listOf(st.tone.copy(alpha = 0.3f), st.tone.copy(alpha = 0.06f))))
+                        .border(1.dp, st.tone.copy(alpha = 0.55f), RoundedCornerShape(18.dp))
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(st.emoji, fontSize = 26.sp)
+                    Spacer(Modifier.width(12.dp))
+                    Column {
+                        Text(st.title, style = MaterialTheme.typography.titleLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        if (st.detail.isNotEmpty()) {
+                            Text(st.detail, style = MaterialTheme.typography.bodyMedium, color = scheme.onSurfaceVariant)
+                        }
                     }
                 }
             }
+            if (game.hintsAllowed != 0 && result == null) {
+                Spacer(Modifier.width(8.dp))
+                HintButton(vm, game)
+            }
         }
-        if (game.hintsAllowed != 0 && result == null) {
-            Spacer(Modifier.width(8.dp))
-            HintButton(vm, game)
+
+        if (online?.phase == LinkPhase.LOST) {
+            TextButton(onClick = vm::leaveOnline) { Text("📴 Keep playing on this phone instead") }
         }
     }
 }
@@ -598,7 +756,7 @@ private fun turnDetail(game: GameState): String {
 @Composable
 private fun HintButton(vm: GameViewModel, game: GameState) {
     val left = game.hintsLeft(game.toMove)
-    val enabled = left > 0 && !vm.thinking && game.pendingRoll == null
+    val enabled = left > 0 && !vm.thinking && game.pendingRoll == null && vm.myTurn(game)
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         FilledTonalIconButton(onClick = vm::requestHint, enabled = enabled, modifier = Modifier.size(52.dp)) {
             if (vm.thinking) CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.5.dp)
@@ -703,7 +861,7 @@ private fun PieceCard(vm: GameViewModel, game: GameState) {
                 Text("${perk.emoji} ${perk.label}: ${perk.text}", style = MaterialTheme.typography.bodySmall)
             }
         }
-        val healer = Rules.absolverFor(game, sq)
+        val healer = if (vm.myTurn(game)) Rules.absolverFor(game, sq) else null
         if (healer != null) {
             Spacer(Modifier.width(8.dp))
             FilledTonalButton(
@@ -791,7 +949,7 @@ fun PieceTile(kind: Kind, side: Side, size: Dp, modifier: Modifier = Modifier) {
 /** End of game: the result plus how everybody felt along the way. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun ReportCard(game: GameState, onNewGame: () -> Unit, onUndo: () -> Unit, onViewBoard: () -> Unit) {
+fun ReportCard(game: GameState, onNewGame: () -> Unit, onUndo: (() -> Unit)?, onViewBoard: () -> Unit) {
     val scheme = MaterialTheme.colorScheme
     val result = game.result ?: return
     Surface(shape = RoundedCornerShape(28.dp), color = scheme.surfaceContainerHigh) {
@@ -864,7 +1022,7 @@ fun ReportCard(game: GameState, onNewGame: () -> Unit, onUndo: () -> Unit, onVie
             Spacer(Modifier.height(16.dp))
             Button(onClick = onNewGame, modifier = Modifier.fillMaxWidth().height(52.dp)) { Text("New game", fontSize = 17.sp) }
             Row {
-                TextButton(onClick = onUndo) { Text("Undo last move") }
+                if (onUndo != null) TextButton(onClick = onUndo) { Text("Undo last move") }
                 TextButton(onClick = onViewBoard) { Text("View board") }
             }
         }

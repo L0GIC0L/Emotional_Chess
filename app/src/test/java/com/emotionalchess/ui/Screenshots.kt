@@ -94,7 +94,7 @@ class Screenshots {
     }
 
     @Test fun newGame() = paparazzi.snapshot {
-        EmotionalChessTheme { Backdrop { NewGameScreen { _, _, _, _ -> } } }
+        EmotionalChessTheme { Backdrop { NewGameScreen(onStart = { _, _, _, _ -> }) } }
     }
 
     @Test fun midGame() = paparazzi.snapshot {
@@ -187,5 +187,57 @@ class Screenshots {
         val deadline = System.currentTimeMillis() + 10_000
         while (vm.thinking && System.currentTimeMillis() < deadline) Thread.sleep(20)
         paparazzi.snapshot { EmotionalChessTheme { App(vm) } }
+    }
+
+    // ------------------------------------------------------------------ two phones
+
+    @Test fun twoPhoneSetup() = paparazzi.snapshot {
+        EmotionalChessTheme { Backdrop { NewGameScreen(onStart = { _, _, _, _ -> }, startWithTwoPhones = true) } }
+    }
+
+    private fun linkedPair(): Pair<GameViewModel, GameViewModel> {
+        val net = com.emotionalchess.net.FakeNetwork()
+        val a = net.newLink()
+        val b = net.newLink()
+        val noSave = object : GameStore {
+            override fun load(): SaveData? = null
+            override fun save(game: GameState?, undo: List<GameState>, flipped: Boolean) = Unit
+        }
+        val host = GameViewModel(noSave) { a }
+        val guest = GameViewModel(noSave) { b }
+        host.hostGame(Mode.EMOTIONAL, "Ada", 3, Side.WHITE)
+        guest.joinGame("Grace")
+        net.flush()
+        return host to guest
+    }
+
+    @Test fun lobby() {
+        val (_, guest) = linkedPair()
+        paparazzi.snapshot { EmotionalChessTheme { App(guest) } }
+    }
+
+    @Test fun waitingForFriend() {
+        val net = com.emotionalchess.net.FakeNetwork()
+        val a = net.newLink()
+        val b = net.newLink()
+        val noSave = object : GameStore {
+            override fun load(): SaveData? = null
+            override fun save(game: GameState?, undo: List<GameState>, flipped: Boolean) = Unit
+        }
+        val host = GameViewModel(noSave) { a }
+        val guest = GameViewModel(noSave) { b }
+        host.hostGame(Mode.EMOTIONAL, "Ada", 3, Side.WHITE)
+        guest.joinGame("Grace")
+        net.flush()
+        guest.connectTo(guest.online!!.found.single())
+        net.flush()
+        host.answerJoinRequest(true)
+        net.flush()
+        for ((f, t) in listOf("e2" to "e4", "d7" to "d5")) {
+            val mover = if (host.myTurn()) host else guest
+            mover.onSquareTapped(sq(f)); mover.onSquareTapped(sq(t)); net.flush()
+        }
+        // Grace's phone while Ada thinks.
+        paparazzi.snapshot { EmotionalChessTheme { App(guest) } }
     }
 }

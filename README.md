@@ -66,6 +66,28 @@ Absolution takes a whole turn: a friendly, non-devastated bishop next to the aff
   <img src="docs/screenshots/report.png" width="240" alt="End-of-game emotional report">
 </p>
 
+## Two phones
+
+Each player can use their own phone. The phones link directly over Bluetooth / Wi-Fi in the same room
+(Google Nearby Connections), with no account and no server.
+
+1. Both players choose **Two phones** on the start screen.
+2. One taps **Host** (after picking the mode, their side and hints); the other taps **Join a friend's game**
+   and picks the host from the list.
+3. Both phones show the same 4-digit code; the host checks it and lets their friend in.
+
+Each phone only lets its own player move; dice rolls, perk picks, hints, draw offers and resignations
+reach the other phone. Every move carries a checksum of the resulting game, and if the phones ever
+disagree the host's game wins and is resent. If the connection drops, both phones look for each other
+again and carry on; or tap **Keep playing on this phone** to finish the game on one phone. There is no
+undo between phones. Needs Google Play services and the Nearby devices permission.
+
+<p align="center">
+  <img src="docs/screenshots/two-phones.png" width="240" alt="Choosing two phones">
+  <img src="docs/screenshots/lobby.png" width="240" alt="Finding a friend's game">
+  <img src="docs/screenshots/two-phones-game.png" width="240" alt="Waiting for the other phone's move">
+</p>
+
 ## Features
 
 - **Hints.** A built-in engine (iterative-deepening alpha-beta on top of the app's own rules, so it
@@ -90,8 +112,10 @@ Download it from the run's **Artifacts** section (`emotional-chess-debug-apk`) a
 
 Locally: `./gradlew testDebugUnitTest assembleDebug` (JDK 17+, Android SDK 35).
 
-The move generator is checked against published perft counts, every mode has rule tests, and the hint
-engine is tested on mates, free material and every mode. The screenshots above are rendered on the JVM by
+The move generator is checked against published perft counts, every mode has rule tests, the hint
+engine is tested on mates, free material and every mode, and two-phone play is tested end to end with
+two app instances on an in-memory link (joining, moves, dice, perks, hints, draws, resyncs, dropped
+connections). The screenshots above are rendered on the JVM by
 [Paparazzi](https://github.com/cashapp/paparazzi) (`app/src/test/java/com/emotionalchess/ui/Screenshots.kt`);
 `./gradlew recordPaparazziDebug` regenerates them into `app/src/test/snapshots/images/`.
 
