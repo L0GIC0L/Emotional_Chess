@@ -163,4 +163,61 @@ class RulesTest {
         assertEquals(Kind.KING, g.board[sq("g1")]!!.kind)
         assertEquals(Kind.ROOK, g.board[sq("f1")]!!.kind)
     }
+
+    @Test
+    fun piecesHaveStableUniqueIds() {
+        var g = Rules.newGame(Mode.EMOTIONAL)
+        assertEquals((0..31).toSet(), g.board.mapNotNull { it?.id }.toSet())
+        val knight = g.board[sq("g1")]!!.id
+        g = g.move("g1", "f3")
+        assertEquals(knight, g.board[sq("f3")]!!.id)
+    }
+
+    @Test
+    fun promotionKeepsIdentity() {
+        var g = position(
+            Mode.EMOTIONAL, Side.WHITE,
+            "e1" to w(Kind.KING), "h8" to b(Kind.KING), "a7" to w(Kind.PAWN).copy(id = 7),
+        )
+        g = g.move("a7", "a8", Kind.QUEEN)
+        assertEquals(Kind.QUEEN, g.board[sq("a8")]!!.kind)
+        assertEquals(7, g.board[sq("a8")]!!.id)
+    }
+
+    @Test
+    fun capturesRollsAndDespairAreRecorded() {
+        var g = Rules.newGame(Mode.EMOTIONAL)
+        g = g.move("e2", "e4").move("d7", "d5").move("e4", "d5")
+        assertEquals(listOf(Fallen(Side.BLACK, Kind.PAWN)), g.fallen)
+        g = Rules.applyRoll(g, 1)
+        assertEquals(listOf(RollRecord(Side.WHITE, Kind.PAWN, 1)), g.rolls)
+        for ((b, w) in listOf(("g8" to "f6") to ("g1" to "f3"), ("f6" to "g8") to ("f3" to "g1"), ("g8" to "f6") to ("g1" to "f3"))) {
+            g = g.move(b.first, b.second).move(w.first, w.second)
+        }
+        assertEquals(Fallen(Side.WHITE, Kind.PAWN, despair = true), g.fallen.last())
+    }
+
+    @Test
+    fun absolutionAndForgivenessAreRecorded() {
+        val dice = position(
+            Mode.EMOTIONAL, Side.WHITE,
+            "e1" to w(Kind.KING), "h8" to b(Kind.KING),
+            "d4" to w(Kind.KNIGHT, Mood.GUILTY), "c3" to w(Kind.BISHOP),
+        )
+        assertEquals(listOf(Absolution(Side.WHITE, Kind.KNIGHT)), Rules.absolve(dice, sq("d4")).absolutions)
+
+        val classic = position(
+            Mode.CLASSIC, Side.WHITE,
+            "e1" to w(Kind.KING), "h8" to b(Kind.KING),
+            "d4" to w(Kind.KNIGHT, Mood.GUILTY), "f1" to w(Kind.BISHOP),
+        )
+        assertEquals(listOf(Absolution(Side.WHITE, Kind.KNIGHT)), classic.move("f1", "d3").absolutions)
+    }
+
+    @Test
+    fun onlyLegalMovesAreAccepted() {
+        val g = Rules.newGame(Mode.CLASSIC)
+        val illegal = Move(sq("e2"), sq("e5"))
+        assertTrue(runCatching { Rules.play(g, illegal) }.isFailure)
+    }
 }

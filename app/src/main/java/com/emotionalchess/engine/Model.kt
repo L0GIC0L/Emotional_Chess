@@ -46,6 +46,8 @@ data class Piece(
     /** Devastated during the current turn; the countdown starts on the owner's next turn. */
     val fresh: Boolean = false,
     val moved: Boolean = false,
+    /** Stable identity so the board can animate a piece as it moves. -1 = unknown (old saves). */
+    val id: Int = -1,
 ) {
     val frozen: Boolean get() = mood == Mood.DEVASTATED
     /** Guilty and devastated pieces cannot capture, and therefore give no check. */
@@ -64,6 +66,17 @@ data class Move(
 
 @Serializable
 data class GameResult(val winner: Side?, val reason: String)
+
+/** A piece that left the board: captured, or overcome by despair. [side] is its owner. */
+@Serializable
+data class Fallen(val side: Side, val kind: Kind, val despair: Boolean = false)
+
+@Serializable
+data class RollRecord(val side: Side, val kind: Kind, val roll: Int)
+
+/** A guilty or devastated piece that was absolved (dice) or forgiven (classic). */
+@Serializable
+data class Absolution(val side: Side, val kind: Kind)
 
 @Serializable
 data class GameState(
@@ -84,6 +97,9 @@ data class GameState(
     val result: GameResult? = null,
     val log: List<String> = emptyList(),
     val positions: List<String> = emptyList(),
+    val fallen: List<Fallen> = emptyList(),
+    val rolls: List<RollRecord> = emptyList(),
+    val absolutions: List<Absolution> = emptyList(),
 ) {
     fun playerName(side: Side): String = if (side == Side.WHITE) whiteName else blackName
 }

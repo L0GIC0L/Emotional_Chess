@@ -47,10 +47,10 @@ object Rules {
         val board = MutableList<Piece?>(64) { null }
         val back = listOf(Kind.ROOK, Kind.KNIGHT, Kind.BISHOP, Kind.QUEEN, Kind.KING, Kind.BISHOP, Kind.KNIGHT, Kind.ROOK)
         for (f in 0..7) {
-            board[sq(f, 0)] = Piece(Side.WHITE, back[f])
-            board[sq(f, 1)] = Piece(Side.WHITE, Kind.PAWN)
-            board[sq(f, 6)] = Piece(Side.BLACK, Kind.PAWN)
-            board[sq(f, 7)] = Piece(Side.BLACK, back[f])
+            board[sq(f, 0)] = Piece(Side.WHITE, back[f], id = f)
+            board[sq(f, 1)] = Piece(Side.WHITE, Kind.PAWN, id = 8 + f)
+            board[sq(f, 6)] = Piece(Side.BLACK, Kind.PAWN, id = 16 + f)
+            board[sq(f, 7)] = Piece(Side.BLACK, back[f], id = 24 + f)
         }
         val state = GameState(
             mode = mode,
@@ -257,6 +257,7 @@ object Rules {
         val wasBonus = s.bonusSquare != null
         val log = s.log.toMutableList()
         log += describe(s, m, p, captured, wasBonus)
+        val absolutions = s.absolutions.toMutableList()
 
         val isDoublePush = p.kind == Kind.PAWN && abs(rank(m.to) - rank(m.from)) == 2
         var next = s.copy(
@@ -273,10 +274,15 @@ object Rules {
                 if (f.side == p.side && f.mood == Mood.GUILTY) {
                     board[n] = f.copy(mood = Mood.CALM)
                     log += "   ✝ ${f.name} on ${squareName(n)} is forgiven"
+                    absolutions += Absolution(f.side, f.kind)
                 }
             }
         }
 
+        next = next.copy(
+            absolutions = absolutions,
+            fallen = if (captured != null) s.fallen + Fallen(captured.side, captured.kind) else s.fallen,
+        )
         if (captured != null) {
             if (captured.kind == Kind.KING) {
                 log += "   ☠ The psychopath captured the king!"
@@ -328,7 +334,8 @@ object Rules {
             fresh = mood == Mood.DEVASTATED,
         )
         val log = s.log + "   🎲 Rolled $roll – ${p.name} is ${moodLabel(mood, s.mode).lowercase()}"
-        return endTurn(s.copy(board = board, pendingRoll = null, log = log))
+        val rolls = s.rolls + RollRecord(p.side, p.kind, roll)
+        return endTurn(s.copy(board = board, pendingRoll = null, log = log, rolls = rolls))
     }
 
     fun absolve(s: GameState, target: Int): GameState {
@@ -338,7 +345,12 @@ object Rules {
         board[target] = p.copy(mood = Mood.UNAFFECTED, countdown = 0, fresh = false)
         val prefix = if (s.toMove == Side.WHITE) "${s.fullmove}." else "${s.fullmove}…"
         val log = s.log + "$prefix ✝ Bishop ${squareName(bishop)} absolves ${p.kind.label} ${squareName(target)}"
-        return endTurn(s.copy(board = board, log = log, lastMove = null, epSquare = null, halfmoveClock = s.halfmoveClock + 1))
+        return endTurn(
+            s.copy(
+                board = board, log = log, lastMove = null, epSquare = null, halfmoveClock = s.halfmoveClock + 1,
+                absolutions = s.absolutions + Absolution(p.side, p.kind),
+            )
+        )
     }
 
     /** Resign / agreed draw from the table. */
@@ -354,6 +366,7 @@ object Rules {
         val mover = s.toMove
         val board = s.board.toMutableList()
         val log = s.log.toMutableList()
+        val fallen = s.fallen.toMutableList()
         var loss: String? = null
         var removed = false
         for (i in 0 until 64) {
@@ -367,6 +380,7 @@ object Rules {
             if (left <= 0) {
                 board[i] = null
                 removed = true
+                fallen += Fallen(p.side, p.kind, despair = true)
                 log += "   💧 ${p.name} on ${squareName(i)} was overcome by despair and left the board"
                 if (p.kind == Kind.KING) loss = "${mover.label}'s king was overcome by despair"
             } else board[i] = p.copy(countdown = left)
@@ -378,6 +392,7 @@ object Rules {
         var next = s.copy(
             board = board,
             log = log,
+            fallen = fallen,
             toMove = mover.other,
             fullmove = if (mover == Side.BLACK) s.fullmove + 1 else s.fullmove,
         )

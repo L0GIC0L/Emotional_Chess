@@ -1,18 +1,22 @@
 package com.emotionalchess.ui
 
-import android.app.Application
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.lifecycle.AndroidViewModel
-import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.ViewModel
 import com.emotionalchess.engine.GameState
+import com.emotionalchess.engine.History
+import com.emotionalchess.engine.Kind
 import com.emotionalchess.engine.Mode
 import com.emotionalchess.engine.Mood
 import com.emotionalchess.engine.Move
 import com.emotionalchess.engine.Rules
 import com.emotionalchess.engine.Side
+import com.emotionalchess.engine.Snapshot
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -20,20 +24,58 @@ import java.io.File
 import kotlin.random.Random
 
 @Serializable
-private data class SaveData(
+data class SaveData(
     val game: GameState? = null,
+    /** Undo states in the first save format (whole states). Read for old saves only. */
     val undo: List<GameState> = emptyList(),
+    val history: List<Snapshot> = emptyList(),
     val flipped: Boolean = false,
 )
 
-data class RollReveal(val roll: Int, val mood: Mood, val pieceName: String)
+interface GameStore {
+    fun load(): SaveData?
+    fun save(game: GameState?, undo: List<GameState>, flipped: Boolean)
+}
 
-class GameViewModel(app: Application) : AndroidViewModel(app) {
+/** Saves in the background, one write at a time, via a temp file so a crash never leaves half a save. */
+class FileGameStore(private val file: File) : GameStore {
     private val json = Json { ignoreUnknownKeys = true }
-    private val saveFile = File(app.filesDir, "game.json")
-    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
-    private val io = Dispatchers.IO.limitedParallelism(1)
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO.limitedParallelism(1))
 
+    override fun load(): SaveData? = runCatching { json.decodeFromString<SaveData>(file.readText()) }.getOrNull()
+
+    override fun save(game: GameState?, undo: List<GameState>, flipped: Boolean) {
+        scope.launch {
+            runCatching {
+                val history = if (game != null) History.compact(game, undo) else emptyList()
+                val tmp = File(file.path + ".tmp")
+                tmp.writeText(json.encodeToString(SaveData.serializer(), SaveData(game, history = history, flipped = flipped)))
+                if (!tmp.renameTo(file)) {
+                    file.delete()
+                    tmp.renameTo(file)
+                }
+            }
+        }
+    }
+}
+
+data class RollReveal(
+    val roll: Int,
+    val mood: Mood,
+    val pieceName: String,
+    val kind: Kind,
+    val side: Side,
+    /** True when the app rolled: play the tumble. A typed-in physical roll is revealed at once. */
+    val animated: Boolean,
+)
+
+enum class FeedbackKind { MOVE, CAPTURE, CHECK, GAME_OVER }
+
+/** One-shot haptic cue; a fresh [seq] makes every event distinct. */
+data class Feedback(val seq: Long, val kind: FeedbackKind)
+
+class GameViewModel(private val store: GameStore) : ViewModel() {
     var game by mutableStateOf<GameState?>(null)
         private set
     private var undoStack: List<GameState> = emptyList()
@@ -49,13 +91,16 @@ class GameViewModel(app: Application) : AndroidViewModel(app) {
         private set
     var showResult by mutableStateOf(true)
         private set
+    var feedback by mutableStateOf<Feedback?>(null)
+        private set
+    private var feedbackSeq = 0L
 
     init {
-        runCatching { json.decodeFromString<SaveData>(saveFile.readText()) }.getOrNull()?.let {
-            game = it.game
-            undoStack = it.undo
+        store.load()?.let { data ->
+            game = data.game
+            undoStack = data.game?.let { g -> if (data.history.isNotEmpty()) History.expand(g, data.history) else data.undo }.orEmpty()
             canUndo = undoStack.isNotEmpty()
-            flipped = it.flipped
+            flipped = data.flipped
         }
     }
 
@@ -76,6 +121,7 @@ class GameViewModel(app: Application) : AndroidViewModel(app) {
         selected = null
         flipped = false
         showResult = true
+        rollReveal = null
         persist()
     }
 
@@ -83,6 +129,7 @@ class GameViewModel(app: Application) : AndroidViewModel(app) {
         game = null
         undoStack = emptyList()
         selected = null
+        rollReveal = null
         persist()
     }
 
@@ -98,7 +145,7 @@ class GameViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
         val p = g.board[sq]
-        selected = if (p != null && sq != sel) sq else null
+        selected = if (p != null && sq != sel) sq else g.bonusSquare
     }
 
     fun choosePromotion(move: Move?) {
@@ -118,9 +165,9 @@ class GameViewModel(app: Application) : AndroidViewModel(app) {
         val g = game ?: return
         val at = g.pendingRoll ?: return
         val value = roll ?: Random.nextInt(1, 7)
-        val name = g.board[at]?.name ?: "Piece"
-        commit(Rules.applyRoll(g, value))
-        rollReveal = RollReveal(value, Rules.moodForRoll(value), name)
+        val p = g.board[at] ?: return
+        rollReveal = RollReveal(value, Rules.moodForRoll(value), p.name, p.kind, p.side, animated = roll == null)
+        commit(Rules.applyRoll(g, value), haptics = false)
     }
 
     fun dismissRoll() { rollReveal = null }
@@ -135,7 +182,7 @@ class GameViewModel(app: Application) : AndroidViewModel(app) {
         if (undoStack.isEmpty()) return
         game = undoStack.last()
         undoStack = undoStack.dropLast(1)
-        selected = null
+        selected = game?.bonusSquare
         rollReveal = null
         showResult = true
         persist()
@@ -146,20 +193,27 @@ class GameViewModel(app: Application) : AndroidViewModel(app) {
         persist()
     }
 
-    private fun commit(next: GameState) {
-        game?.let { undoStack = (undoStack + it).takeLast(MAX_UNDO) }
+    private fun commit(next: GameState, haptics: Boolean = true) {
+        val before = game
+        before?.let { undoStack = (undoStack + it).takeLast(MAX_UNDO) }
         game = next
         selected = next.bonusSquare
         showResult = true
+        if (haptics || next.result != null) {
+            val kind = when {
+                next.result != null -> FeedbackKind.GAME_OVER
+                Rules.inCheck(next) -> FeedbackKind.CHECK
+                before != null && next.fallen.size > before.fallen.size -> FeedbackKind.CAPTURE
+                else -> FeedbackKind.MOVE
+            }
+            feedback = Feedback(++feedbackSeq, kind)
+        }
         persist()
     }
 
     private fun persist() {
         canUndo = undoStack.isNotEmpty()
-        val data = SaveData(game, undoStack, flipped)
-        viewModelScope.launch(io) {
-            runCatching { saveFile.writeText(json.encodeToString(SaveData.serializer(), data)) }
-        }
+        store.save(game, undoStack, flipped)
     }
 
     private companion object {
