@@ -18,8 +18,11 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
-      - name: Unit tests
+      - name: Unit tests (rules, hints, two-phone protocol, screenshots)
         run: ./gradlew testDebugUnitTest
+
+      - name: Desktop render check
+        run: ./gradlew :app:desktopTest
 
       - name: Build debug APK
         run: ./gradlew assembleDebug

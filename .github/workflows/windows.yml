@@ -1,0 +1,37 @@
+name: Windows app
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # An installer (.msi) and a portable folder with EmotionalChess.exe and its own Java runtime.
+      - name: Build installer and portable app
+        run: ./gradlew.bat :app:packageMsi :app:createDistributable
+
+      - name: Zip the portable app
+        shell: pwsh
+        run: Compress-Archive -Path app/build/compose/binaries/main/app/EmotionalChess -DestinationPath EmotionalChess-windows-portable.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: emotional-chess-windows-installer
+          path: app/build/compose/binaries/main/msi/*.msi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: emotional-chess-windows-portable
+          path: EmotionalChess-windows-portable.zip

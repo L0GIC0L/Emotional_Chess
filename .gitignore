@@ -33,3 +33,7 @@ google-services.json
 
 # Android Profiling
 *.hprof
+
+# Paparazzi screenshot output (curated copies live in docs/screenshots)
+app/src/test/snapshots/
+app/src/androidUnitTest/snapshots/
