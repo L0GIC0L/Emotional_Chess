@@ -1,9 +1,28 @@
 # Emotional Chess
 
-An Android companion for playing chess **on a real board** with a friend: plain chess, six well-known
-variants, and four modes where the pieces have feelings, diseases and powers. Mirror each move on the
-phone. The app knows the rules of every mode, shows what each piece may do, keeps track of everything
-you can't see on the physical board, and can suggest a move when you're stuck.
+A companion for playing chess **on a real board** with a friend: plain chess, six well-known variants,
+and four modes where the pieces have feelings, diseases and powers. Mirror each move in the app. It knows
+the rules of every mode, shows what each piece may do, keeps track of everything you can't see on the
+physical board, and can suggest a move when you're stuck.
+
+Runs on **Android**, **Windows** (also macOS/Linux) and **in any web browser**, from one Kotlin codebase
+(Compose Multiplatform).
+
+## Get it
+
+| Where | How |
+|---|---|
+| Android | Latest run of **Android build** under Actions → Artifacts → `emotional-chess-debug-apk`. Install the APK. |
+| Windows | Latest run of **Windows app** → Artifacts → `emotional-chess-windows-installer` (an `.msi`), or `emotional-chess-windows-portable` (unzip, run `EmotionalChess.exe`). The app isn't code-signed, so Windows SmartScreen asks first: **More info → Run anyway**. |
+| Web | **https://l0gic0l.github.io/Emotional_Chess/** – published from `main` by the **Web app** workflow (Settings → Pages → Source: *GitHub Actions* must be set once). Works on PCs, Macs, iPhones and Android phones. |
+
+<p align="center">
+  <img src="docs/screenshots/desktop.png" width="560" alt="The desktop app">
+  <img src="docs/screenshots/web.png" width="200" alt="The web app on a phone, showing a hint">
+</p>
+
+Two-phone play (below) needs Android; every other feature works everywhere. Saves stay on the device:
+a file on Android and desktop, the browser's storage on the web.
 
 <p align="center">
   <img src="docs/screenshots/new-game.png" width="240" alt="Choosing a mode">
@@ -107,17 +126,27 @@ undo between phones. Needs Google Play services and the Nearby devices permissio
 
 ## Building
 
-GitHub Actions (`.github/workflows/android.yml`) runs the unit tests and builds a debug APK on every push.
-Download it from the run's **Artifacts** section (`emotional-chess-debug-apk`) and install it on the phone.
+The code lives in one module, `app`: rules, hint engine, two-phone protocol and all screens in
+`src/commonMain`; small per-platform pieces (Nearby, permissions, haptics, saving, fonts) in
+`src/androidMain`, `src/desktopMain` and `src/wasmJsMain`.
 
-Locally: `./gradlew testDebugUnitTest assembleDebug` (JDK 17+, Android SDK 35).
+| Target | Command (JDK 17+) |
+|---|---|
+| Android APK | `./gradlew assembleDebug` (Android SDK 35) |
+| Desktop, run now | `./gradlew :app:run` |
+| Windows installer / portable app | `./gradlew :app:packageMsi` / `:app:createDistributable` (on Windows) |
+| Web | `./gradlew :app:wasmJsBrowserDistribution` → `app/build/dist/wasmJs/productionExecutable`; try it with `./gradlew :app:wasmJsBrowserDevelopmentRun` |
+| Tests | `./gradlew testDebugUnitTest :app:desktopTest` |
+
+GitHub Actions builds all three on every push (`.github/workflows/`).
 
 The move generator is checked against published perft counts, every mode has rule tests, the hint
 engine is tested on mates, free material and every mode, and two-phone play is tested end to end with
 two app instances on an in-memory link (joining, moves, dice, perks, hints, draws, resyncs, dropped
 connections). The screenshots above are rendered on the JVM by
-[Paparazzi](https://github.com/cashapp/paparazzi) (`app/src/test/java/com/emotionalchess/ui/Screenshots.kt`);
-`./gradlew recordPaparazziDebug` regenerates them into `app/src/test/snapshots/images/`.
+[Paparazzi](https://github.com/cashapp/paparazzi) (`app/src/androidUnitTest/kotlin/com/emotionalchess/ui/Screenshots.kt`);
+`./gradlew recordPaparazziDebug` regenerates them. The desktop app is rendered off-screen by
+`app/src/desktopTest`, into `app/build/desktop-shots/`.
 
 ## Credits
 
@@ -125,3 +154,7 @@ connections). The screenshots above are rendered on the JVM by
   (the set is triple-licensed GFDL/BSD/GPL).
 - Display font: [DM Serif Display](https://fonts.google.com/specimen/DM+Serif+Display), SIL Open Font Licence
   (`licenses/DMSerifDisplay-OFL.txt`).
+- Web build only: a subset of [Noto Color Emoji](https://github.com/googlefonts/noto-emoji) (SIL Open Font
+  Licence, `licenses/NotoColorEmoji-LICENSE.txt`) and eight punctuation marks from DejaVu Sans
+  (`licenses/DejaVu-LICENSE.txt`), because a browser canvas has no system fonts.
+- Seven Material icons (Apache 2.0), copied into `AppIcons.kt`.

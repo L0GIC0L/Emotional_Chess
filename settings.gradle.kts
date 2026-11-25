@@ -6,7 +6,7 @@ pluginManagement {
     }
 }
 dependencyResolutionManagement {
-    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    // The web build adds its own Node.js and Yarn download repositories at the root project.
     repositories {
         google()
         mavenCentral()
