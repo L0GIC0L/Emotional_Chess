@@ -5,24 +5,23 @@ and four modes where the pieces have feelings, diseases and powers. Mirror each 
 the rules of every mode, shows what each piece may do, keeps track of everything you can't see on the
 physical board, and can suggest a move when you're stuck.
 
-Runs on **Android**, **Windows** (also macOS/Linux) and **in any web browser**, from one Kotlin codebase
-(Compose Multiplatform).
+Runs on **Android** and **in any web browser** (PCs, Macs, iPhones, Android phones), from one Kotlin
+codebase (Compose Multiplatform).
 
 ## Get it
 
 | Where | How |
 |---|---|
 | Android | Latest run of **Android build** under Actions → Artifacts → `emotional-chess-debug-apk`. Install the APK. |
-| Windows | Latest run of **Windows app** → Artifacts → `emotional-chess-windows-installer` (an `.msi`), or `emotional-chess-windows-portable` (unzip, run `EmotionalChess.exe`). The app isn't code-signed, so Windows SmartScreen asks first: **More info → Run anyway**. |
 | Web | **https://l0gic0l.github.io/Emotional_Chess/** – published from `main` by the **Web app** workflow (Settings → Pages → Source: *GitHub Actions* must be set once). Works on PCs, Macs, iPhones and Android phones. |
 
 <p align="center">
-  <img src="docs/screenshots/desktop.png" width="560" alt="The desktop app">
+  <img src="docs/screenshots/desktop.png" width="560" alt="On a wide screen">
   <img src="docs/screenshots/web.png" width="200" alt="The web app on a phone, showing a hint">
 </p>
 
-Two-phone play (below) needs Android; every other feature works everywhere. Saves stay on the device:
-a file on Android and desktop, the browser's storage on the web.
+Play against a friend on **one device**, **online from two browsers** (anywhere), or on **two Android
+phones in the same room**. Saves stay on the device: a file on Android, the browser's storage on the web.
 
 <p align="center">
   <img src="docs/screenshots/new-game.png" width="240" alt="Choosing a mode">
@@ -85,7 +84,27 @@ Absolution takes a whole turn: a friendly, non-devastated bishop next to the aff
   <img src="docs/screenshots/report.png" width="240" alt="End-of-game emotional report">
 </p>
 
-## Two phones
+## Online (website)
+
+Each player uses their own browser – phone or computer, anywhere.
+
+1. One player chooses **Online**, picks the mode, their side and hints, and taps **Host**.
+2. The website shows a 5-letter room code and an invitation link (**Share the invitation link**).
+3. The friend opens the link (or chooses **Online**, types the code and taps **Join room …**).
+
+The two browsers talk directly over WebRTC; the free public [PeerJS](https://peerjs.com) server only
+introduces them, so there is no account and nothing to run. Phones often reload a page in the
+background (for example while you send the link): the page remembers its room, the host reopens the
+same room, and the guest finds it again. Some strict networks block direct connections; if joining
+fails, try another network (for example both on Wi-Fi).
+
+<p align="center">
+  <img src="docs/screenshots/online-room.png" width="240" alt="The host's room code and invitation link">
+  <img src="docs/screenshots/online-game.png" width="240" alt="The host's page during an online game">
+  <img src="docs/screenshots/online-guest.png" width="240" alt="The guest's page, seen from Black">
+</p>
+
+## Two Android phones in the same room
 
 Each player can use their own phone. The phones link directly over Bluetooth / Wi-Fi in the same room
 (Google Nearby Connections), with no account and no server.
@@ -95,8 +114,8 @@ Each player can use their own phone. The phones link directly over Bluetooth / W
    and picks the host from the list.
 3. Both phones show the same 4-digit code; the host checks it and lets their friend in.
 
-Each phone only lets its own player move; dice rolls, perk picks, hints, draw offers and resignations
-reach the other phone. Every move carries a checksum of the resulting game, and if the phones ever
+Online and on two phones alike, each device only lets its own player move; dice rolls, perk picks,
+hints, draw offers and resignations reach the other one. Every move carries a checksum of the resulting game, and if the phones ever
 disagree the host's game wins and is resent. If the connection drops, both phones look for each other
 again and carry on; or tap **Keep playing on this phone** to finish the game on one phone. There is no
 undo between phones. Needs Google Play services and the Nearby devices permission.
@@ -133,12 +152,14 @@ The code lives in one module, `app`: rules, hint engine, two-phone protocol and 
 | Target | Command (JDK 17+) |
 |---|---|
 | Android APK | `./gradlew assembleDebug` (Android SDK 35) |
-| Desktop, run now | `./gradlew :app:run` |
-| Windows installer / portable app | `./gradlew :app:packageMsi` / `:app:createDistributable` (on Windows) |
+| Desktop window, for quick local testing | `./gradlew :app:run` |
 | Web | `./gradlew :app:wasmJsBrowserDistribution` → `app/build/dist/wasmJs/productionExecutable`; try it with `./gradlew :app:wasmJsBrowserDevelopmentRun` |
 | Tests | `./gradlew testDebugUnitTest :app:desktopTest` |
 
-GitHub Actions builds all three on every push (`.github/workflows/`).
+After adding an emoji or symbol to any text, run `python3 tools/subset_web_fonts.py <NotoColorEmoji.ttf>
+<DejaVuSans.ttf>` so the website's small fonts include it.
+
+GitHub Actions builds and tests the Android app and the website on every push (`.github/workflows/`).
 
 The move generator is checked against published perft counts, every mode has rule tests, the hint
 engine is tested on mates, free material and every mode, and two-phone play is tested end to end with
@@ -158,3 +179,4 @@ connections). The screenshots above are rendered on the JVM by
   Licence, `licenses/NotoColorEmoji-LICENSE.txt`) and eight punctuation marks from DejaVu Sans
   (`licenses/DejaVu-LICENSE.txt`), because a browser canvas has no system fonts.
 - Seven Material icons (Apache 2.0), copied into `AppIcons.kt`.
+- Online play: [PeerJS](https://github.com/peers/peerjs) (MIT) and its free public server.

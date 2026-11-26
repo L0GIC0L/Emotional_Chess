@@ -33,3 +33,24 @@ class BrowserStorage(private val key: String) : TextStorage {
     override fun read(): String? = localStorage.getItem(key)
     override fun write(text: String) = localStorage.setItem(key, text)
 }
+
+actual val linkStyle: LinkStyle = LinkStyle.ONLINE
+
+private fun pageAddress(): String = js("window.location.origin + window.location.pathname")
+
+actual fun joinLink(code: String): String? = pageAddress() + "#join=" + code
+
+private fun canShare(): Boolean = js("typeof navigator.share === 'function' && /Android|iPhone|iPad/i.test(navigator.userAgent)")
+
+private fun share(text: String): Unit = js("{ navigator.share({ url: text }).catch(function () {}); }")
+
+private fun canCopy(): Boolean = js("!!(navigator.clipboard && navigator.clipboard.writeText)")
+
+private fun copy(text: String): Unit = js("{ navigator.clipboard.writeText(text).catch(function () {}); }")
+
+/** Phones get the share sheet; computers get the link copied. */
+actual fun shareText(text: String): String? = when {
+    canShare() -> { share(text); "Shared" }
+    canCopy() -> { copy(text); "Link copied" }
+    else -> null
+}

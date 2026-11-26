@@ -105,7 +105,7 @@ import com.emotionalchess.engine.Rules
 import com.emotionalchess.engine.Side
 
 @Composable
-fun App(vm: GameViewModel) {
+fun App(vm: GameViewModel, joinCode: String? = null) {
     Box(Modifier.fillMaxSize().background(BackdropBrush)) {
         val screen = when {
             vm.game != null -> 2
@@ -118,7 +118,8 @@ fun App(vm: GameViewModel) {
                 which == 2 && game != null -> GameScreen(vm, game)
                 which == 1 && vm.online != null -> LobbyScreen(vm)
                 else -> NewGameScreen(
-                    onStart = vm::newGame, onHost = vm::hostGame, onJoin = vm::joinGame, twoPhonesAvailable = vm.canLink,
+                    onStart = vm::newGame, onHost = vm::hostGame, onJoin = vm::joinGame,
+                    twoPhonesAvailable = vm.canLink, joinCode = joinCode,
                 )
             }
         }
@@ -131,15 +132,19 @@ fun App(vm: GameViewModel) {
 fun NewGameScreen(
     onStart: (Mode, String, String, Int) -> Unit,
     onHost: (Mode, String, Int, Side?) -> Unit = { _, _, _, _ -> },
-    onJoin: (String) -> Unit = {},
+    onJoin: (String, String?) -> Unit = { _, _ -> },
     startWithTwoPhones: Boolean = false,
     twoPhonesAvailable: Boolean = true,
+    /** Online: a room code from an invitation link. */
+    joinCode: String? = null,
 ) {
     var mode by rememberSaveable { mutableStateOf(Mode.STANDARD) }
     var white by rememberSaveable { mutableStateOf("") }
     var black by rememberSaveable { mutableStateOf("") }
     var hints by rememberSaveable { mutableIntStateOf(3) }
-    var twoPhones by rememberSaveable { mutableStateOf(startWithTwoPhones) }
+    var twoPhones by rememberSaveable { mutableStateOf(startWithTwoPhones || joinCode != null) }
+    var code by rememberSaveable { mutableStateOf(joinCode ?: "") }
+    val onlineStyle = linkStyle == LinkStyle.ONLINE
     var myName by rememberSaveable { mutableStateOf("") }
     var mySide by rememberSaveable { mutableStateOf<Side?>(Side.WHITE) }
     var showRules by remember { mutableStateOf(false) }
@@ -166,21 +171,20 @@ fun NewGameScreen(
             )
             if (twoPhonesAvailable) {
                 SectionLabel("Play on")
-                Choice(listOf(false to "📱 One phone", true to "📱📱 Two phones"), twoPhones) { twoPhones = it }
+                Choice(
+                    if (onlineStyle) listOf(false to "💻 This device", true to "🌐 Online")
+                    else listOf(false to "📱 One phone", true to "📱📱 Two phones"),
+                    twoPhones,
+                ) { twoPhones = it }
             }
             if (twoPhones && twoPhonesAvailable) {
                 Text(
-                    "Each player uses their own phone, linked over Bluetooth / Wi-Fi in the same room. No account needed.",
+                    if (onlineStyle) "Play with a friend anywhere. One of you hosts and sends the link or room code; the other joins. Your browsers connect directly – no account needed."
+                    else "Each player uses their own phone, linked over Bluetooth / Wi-Fi in the same room. No account needed.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.fillMaxWidth(),
                 )
-            }
-            for (group in ModeGroup.entries) {
-                SectionLabel(group.title)
-                for (m in Mode.entries.filter { it.group == group }) ModeRow(m, mode == m) { mode = m }
-            }
-            if (twoPhones && twoPhonesAvailable) {
                 SectionLabel("You")
                 OutlinedTextField(
                     myName, { myName = it },
@@ -190,8 +194,24 @@ fun NewGameScreen(
                     keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Done),
                     modifier = Modifier.fillMaxWidth(),
                 )
+                if (onlineStyle) {
+                    OutlinedTextField(
+                        code, { code = it.uppercase().filter(Char::isLetterOrDigit).take(8) },
+                        label = { Text("Room code – to join a friend's game") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(16.dp),
+                        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Characters, imeAction = ImeAction.Done),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                Text("When you host, you play:", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.fillMaxWidth())
                 Choice(listOf(Side.WHITE to "⚪ White", Side.BLACK to "⚫ Black", null to "🎲 Random"), mySide) { mySide = it }
-            } else {
+            }
+            for (group in ModeGroup.entries) {
+                SectionLabel(group.title)
+                for (m in Mode.entries.filter { it.group == group }) ModeRow(m, mode == m) { mode = m }
+            }
+            if (!(twoPhones && twoPhonesAvailable)) {
                 SectionLabel("Players")
                 PlayerField(white, { white = it }, Side.WHITE, ImeAction.Next)
                 PlayerField(black, { black = it }, Side.BLACK, ImeAction.Done)
@@ -207,8 +227,16 @@ fun NewGameScreen(
             if (twoPhones && twoPhonesAvailable) {
                 GlowButton("Host · ${mode.emoji} ${mode.title}") { nearby.run { onHost(mode, myName.trim(), hints, mySide) } }
                 Spacer(Modifier.height(8.dp))
-                OutlinedButton(onClick = { nearby.run { onJoin(myName.trim()) } }, modifier = Modifier.fillMaxWidth().height(50.dp)) {
-                    Text("Join a friend's game", fontSize = 16.sp)
+                if (onlineStyle) {
+                    OutlinedButton(
+                        onClick = { onJoin(myName.trim(), code) },
+                        enabled = code.length >= 4,
+                        modifier = Modifier.fillMaxWidth().height(50.dp),
+                    ) { Text(if (code.length >= 4) "Join room $code" else "Join: enter the room code above", fontSize = 16.sp) }
+                } else {
+                    OutlinedButton(onClick = { nearby.run { onJoin(myName.trim(), null) } }, modifier = Modifier.fillMaxWidth().height(50.dp)) {
+                        Text("Join a friend's game", fontSize = 16.sp)
+                    }
                 }
             } else {
                 GlowButton("Begin · ${mode.emoji} ${mode.title}") { onStart(mode, white.trim(), black.trim(), hints) }
@@ -414,7 +442,7 @@ fun GameScreen(vm: GameViewModel, game: GameState) {
                                     onClick = { menu = false; confirmResign = true },
                                 )
                                 DropdownMenuItem(
-                                    text = { Text("Unlink – keep playing on this phone") },
+                                    text = { Text(if (linkStyle == LinkStyle.ONLINE) "Leave – keep playing on this device" else "Unlink – keep playing on this phone") },
                                     leadingIcon = { Text("📴") },
                                     onClick = { menu = false; vm.leaveOnline() },
                                 )
@@ -621,7 +649,9 @@ private fun StatusBanner(vm: GameViewModel, game: GameState) {
         )
         online?.phase == LinkPhase.LOST -> Status(
             "📡", "Connection lost",
-            "Looking for ${online.peerName ?: "your friend"}'s phone. Keep both apps open, with Bluetooth and Wi-Fi on.", scheme.error,
+            if (linkStyle == LinkStyle.ONLINE) "Reconnecting to ${online.peerName ?: "your friend"}. Keep both pages open."
+            else "Looking for ${online.peerName ?: "your friend"}'s phone. Keep both apps open, with Bluetooth and Wi-Fi on.",
+            scheme.error,
         )
         game.pendingRoll != null -> Status(
             "🎲", if (mine) "Roll the die" else "$name is rolling",
@@ -640,7 +670,7 @@ private fun StatusBanner(vm: GameViewModel, game: GameState) {
         online != null && !mine -> Status(
             if (game.toMove == Side.WHITE) "⚪" else "⚫",
             "$name to move",
-            "Waiting for their move on their phone…",
+            if (linkStyle == LinkStyle.ONLINE) "Waiting for their move…" else "Waiting for their move on their phone…",
             scheme.secondary,
         )
         else -> Status(
@@ -685,7 +715,9 @@ private fun StatusBanner(vm: GameViewModel, game: GameState) {
         }
 
         if (online?.phase == LinkPhase.LOST) {
-            TextButton(onClick = vm::leaveOnline) { Text("📴 Keep playing on this phone instead") }
+            TextButton(onClick = vm::leaveOnline) {
+                Text(if (linkStyle == LinkStyle.ONLINE) "📴 Keep playing on this device instead" else "📴 Keep playing on this phone instead")
+            }
         }
     }
 }

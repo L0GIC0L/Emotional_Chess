@@ -1,4 +1,3 @@
-import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
@@ -54,6 +53,8 @@ kotlin {
         }
         wasmJsMain.dependencies {
             implementation("org.jetbrains.kotlinx:kotlinx-browser:0.3")
+            // Online play: WebRTC between the two browsers, introduced by the free PeerJS server.
+            implementation(npm("peerjs", "1.5.4"))
         }
         androidUnitTest.dependencies {
             implementation("junit:junit:4.13.2")
@@ -92,25 +93,10 @@ android {
     }
 }
 
+// The desktop build is kept only to run the app quickly on a PC (`./gradlew :app:run`) and for
+// the off-screen render tests in src/desktopTest; it is not packaged or shipped.
 compose.desktop {
     application {
         mainClass = "com.emotionalchess.MainKt"
-        nativeDistributions {
-            targetFormats(TargetFormat.Msi, TargetFormat.Exe, TargetFormat.Dmg, TargetFormat.Deb)
-            packageName = "EmotionalChess"
-            packageVersion = "2.0.0"
-            description = "Chess for a real board and a real friend"
-            vendor = "Emotional Chess"
-            windows {
-                iconFile.set(project.file("icons/icon.ico"))
-                menuGroup = "Emotional Chess"
-                shortcut = true
-                dirChooser = true
-                upgradeUuid = "6b3c3f0e-4f7a-4d63-9a51-2f5a8f1d9c47"
-            }
-            linux {
-                iconFile.set(project.file("icons/icon.png"))
-            }
-        }
     }
 }

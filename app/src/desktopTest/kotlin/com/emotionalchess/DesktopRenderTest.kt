@@ -9,6 +9,7 @@ import com.emotionalchess.ui.App
 import com.emotionalchess.ui.EmotionalChessTheme
 import com.emotionalchess.ui.GameStore
 import com.emotionalchess.ui.GameViewModel
+import com.emotionalchess.ui.LinkSave
 import com.emotionalchess.ui.SaveData
 import kotlinx.coroutines.Dispatchers
 import org.jetbrains.skia.EncodedImageFormat
@@ -23,7 +24,7 @@ class DesktopRenderTest {
     private fun vm(game: GameState?) = GameViewModel(
         object : GameStore {
             override fun load() = SaveData(game = game)
-            override fun save(game: GameState?, undo: List<GameState>, flipped: Boolean) = Unit
+            override fun save(game: GameState?, undo: List<GameState>, flipped: Boolean, link: LinkSave?) = Unit
         },
         uiContext = Dispatchers.Unconfined,
     )

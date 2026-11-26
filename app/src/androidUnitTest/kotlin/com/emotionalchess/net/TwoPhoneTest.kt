@@ -8,6 +8,7 @@ import com.emotionalchess.engine.Side
 import com.emotionalchess.ui.GameStore
 import com.emotionalchess.ui.GameViewModel
 import com.emotionalchess.ui.LinkPhase
+import com.emotionalchess.ui.LinkSave
 import com.emotionalchess.ui.SaveData
 import kotlinx.coroutines.Dispatchers
 import org.junit.Assert.assertEquals
@@ -52,26 +53,39 @@ class FakeNetwork {
         }
     }
 
-    inner class FakeLink(val id: String) : PeerLink {
+    inner class FakeLink(var id: String) : PeerLink {
         var listener: PeerListener? = null
         var peer: FakeLink? = null
         var hosting = false
         var discovering = false
         var name = ""
         val sent = mutableListOf<String>()
+        /** Like the online link: the last room joined, offered again after a drop. */
+        var lastRoom: String? = null
 
-        override fun host(name: String, listener: PeerListener) {
+        override fun host(name: String, listener: PeerListener, room: String?) {
+            if (room != null) id = room // reopening a room after a reload keeps its code
             this.listener = listener; this.name = name; hosting = true
-            if (reachable) for (d in links.filter { it.discovering }) queue += { d.listener?.onFound(Endpoint(id, name)) }
+            queue += { listener.onReady(id) } // online play: the link id doubles as the room code
+            if (reachable) for (d in links.filter { it.discovering }) {
+                queue += { d.listener?.onFound(Endpoint(id, name)) }
+                // A guest retrying the room code finds it once it is open again.
+                if (d.lastRoom == id) queue += { d.listener?.onFound(Endpoint(id, "Room $id")) }
+            }
         }
 
-        override fun join(name: String, listener: PeerListener) {
+        override fun join(name: String, listener: PeerListener, rejoin: String?) {
             this.listener = listener; this.name = name; discovering = true
             if (reachable) for (h in links.filter { it.hosting }) queue += { listener.onFound(Endpoint(h.id, h.name)) }
+            // Online-style rejoin after a reload or a drop: the room code is the host link's id.
+            if (rejoin != null) lastRoom = rejoin
+            val room = lastRoom
+            if (room != null && reachable) queue += { listener.onFound(Endpoint(room, "Room $room")) }
         }
 
         override fun connect(endpointId: String) {
-            val host = links.single { it.id == endpointId }
+            lastRoom = endpointId
+            val host = links.singleOrNull { it.id == endpointId && it.hosting } ?: return // not open (yet)
             queue += {
                 host.listener?.onRequest(Endpoint(id, name), "4821")
                 listener?.onRequest(Endpoint(host.id, host.name), "4821")
@@ -99,6 +113,7 @@ class FakeNetwork {
         override fun stop() {
             peer?.let { other -> other.peer = null; queue += { other.listener?.onDisconnected() } }
             peer = null; hosting = false; discovering = false; listener = null
+            links.remove(this) // a closed page is gone from the network
         }
     }
 }
@@ -108,7 +123,7 @@ class TwoPhoneTest {
 
     private class MemoryStore : GameStore {
         override fun load(): SaveData? = null
-        override fun save(game: GameState?, undo: List<GameState>, flipped: Boolean) = Unit
+        override fun save(game: GameState?, undo: List<GameState>, flipped: Boolean, link: LinkSave?) = Unit
     }
 
     private class Pair(val net: FakeNetwork, val host: GameViewModel, val guest: GameViewModel, val hostLink: FakeNetwork.FakeLink)
@@ -141,6 +156,120 @@ class TwoPhoneTest {
     private fun assertInStep(p: Pair) {
         assertNotNull(p.host.game)
         assertEquals(p.host.game, p.guest.game)
+    }
+
+    @Test
+    fun joinByRoomCode() {
+        val net = FakeNetwork()
+        val hostLink = net.newLink()
+        val guestLink = net.newLink()
+        val host = GameViewModel(MemoryStore(), linkFactory = { hostLink }, uiContext = Dispatchers.Unconfined)
+        val guest = GameViewModel(MemoryStore(), linkFactory = { guestLink }, uiContext = Dispatchers.Unconfined)
+        host.hostGame(Mode.ROGUELIKE, "Ada", 3, Side.BLACK)
+        net.flush()
+        val code = host.online!!.roomCode!!
+        guest.joinGame("Grace", "  ${code.lowercase()} ")
+        assertEquals(code, guest.joiningRoom)
+        net.flush()
+        host.answerJoinRequest(true)
+        net.flush()
+        assertEquals(LinkPhase.PLAYING, guest.online!!.phase)
+        assertEquals(Side.WHITE, guest.online!!.mySide)
+        assertEquals("Grace", host.game!!.whiteName)
+        assertEquals(host.game, guest.game)
+    }
+
+    private class RecordingStore : GameStore {
+        var data: SaveData? = null
+        override fun load() = data
+        override fun save(game: GameState?, undo: List<GameState>, flipped: Boolean, link: LinkSave?) {
+            data = SaveData(game, undo = undo, flipped = flipped, link = link)
+        }
+    }
+
+    /** Two browser pages that remember their online game, as the web app does. */
+    private class Pages(val net: FakeNetwork, val hostStore: RecordingStore, val guestStore: RecordingStore) {
+        fun page(store: RecordingStore) =
+            GameViewModel(store, linkFactory = { net.newLink() }, uiContext = Dispatchers.Unconfined, resumeLinks = true)
+        var host = page(hostStore)
+        var guest = page(guestStore)
+    }
+
+    private fun onlineGame(): Pages {
+        val p = Pages(FakeNetwork(), RecordingStore(), RecordingStore())
+        p.host.hostGame(Mode.EMOTIONAL, "Ada", 3, Side.WHITE)
+        p.net.flush()
+        p.guest.joinGame("Grace", p.host.online!!.roomCode)
+        p.net.flush()
+        p.host.answerJoinRequest(true)
+        p.net.flush()
+        p.host.tap("e2", "e4"); p.net.flush()
+        assertEquals(p.host.game, p.guest.game)
+        return p
+    }
+
+    @Test
+    fun guestPageReloadRejoinsTheSameGame() {
+        val p = onlineGame()
+        assertNotNull("the guest page remembers its room", p.guestStore.data?.link)
+        p.guest.close() // the tab reloads
+        p.net.flush()
+        assertEquals(LinkPhase.LOST, p.host.online!!.phase)
+
+        p.guest = p.page(p.guestStore)
+        p.net.flush()
+        assertEquals(LinkPhase.PLAYING, p.guest.online!!.phase)
+        assertEquals(LinkPhase.PLAYING, p.host.online!!.phase)
+        assertEquals(p.host.game, p.guest.game)
+        p.guest.tap("e7", "e5"); p.net.flush()
+        assertEquals(p.host.game, p.guest.game)
+        assertEquals(Side.WHITE, p.host.game!!.toMove)
+    }
+
+    @Test
+    fun hostPageReloadReopensTheSameRoom() {
+        val p = onlineGame()
+        val room = p.host.online!!.roomCode
+        p.host.close() // the host's tab reloads
+        p.net.flush()
+        assertEquals(LinkPhase.LOST, p.guest.online!!.phase)
+
+        p.host = p.page(p.hostStore)
+        p.net.flush()
+        assertEquals(room, p.host.online!!.roomCode)
+        assertEquals(LinkPhase.PLAYING, p.host.online!!.phase)
+        assertEquals(LinkPhase.PLAYING, p.guest.online!!.phase)
+        assertEquals(p.host.game, p.guest.game)
+        p.guest.tap("e7", "e5"); p.net.flush()
+        assertEquals(p.host.game, p.guest.game)
+    }
+
+    @Test
+    fun reloadWhileWaitingKeepsTheRoomOpen() {
+        val p = Pages(FakeNetwork(), RecordingStore(), RecordingStore())
+        p.host.hostGame(Mode.PLAGUE, "Ada", 3, Side.BLACK)
+        p.net.flush()
+        val room = p.host.online!!.roomCode!!
+        p.host.close() // reloaded while sharing the link
+        p.host = p.page(p.hostStore)
+        p.net.flush()
+        assertEquals(room, p.host.online!!.roomCode)
+        assertEquals(LinkPhase.WAITING, p.host.online!!.phase)
+        p.guest.joinGame("Grace", room); p.net.flush()
+        p.host.answerJoinRequest(true); p.net.flush()
+        assertEquals(Mode.PLAGUE, p.guest.game!!.mode)
+        assertEquals(Side.WHITE, p.guest.online!!.mySide)
+    }
+
+    @Test
+    fun invitationReplacesALocalGameButNotTheSameRoom() {
+        val p = onlineGame()
+        val room = p.host.online!!.roomCode!!
+        p.guest.acceptInvitation(room)
+        assertNotNull("already in that room: nothing changes", p.guest.online)
+        p.guest.acceptInvitation("OTHER")
+        assertNull(p.guest.online)
+        assertNull(p.guest.game)
     }
 
     @Test

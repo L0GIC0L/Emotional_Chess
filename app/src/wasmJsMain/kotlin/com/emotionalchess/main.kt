@@ -21,6 +21,7 @@ import com.emotionalchess.ui.EmotionalChessTheme
 import com.emotionalchess.ui.GameViewModel
 import com.emotionalchess.ui.JsonGameStore
 import com.emotionalchess.ui.WebFonts
+import com.emotionalchess.net.PeerJsLink
 import kotlinx.browser.document
 import kotlinx.browser.window
 import kotlinx.coroutines.await
@@ -36,9 +37,22 @@ private suspend fun fetchBytes(url: String): ByteArray {
     return ByteArray(bytes.length) { bytes[it] }
 }
 
+/** An invitation link ends in #join=CODE; read it once, then tidy the address bar. */
+private fun invitationCode(): String? {
+    val hash = window.location.hash
+    if (!hash.startsWith("#join=")) return null
+    clearHash()
+    return hash.removePrefix("#join=").filter(Char::isLetterOrDigit).uppercase().ifEmpty { null }
+}
+
+private fun clearHash(): Unit = js("history.replaceState(null, '', window.location.pathname + window.location.search)")
+
 @OptIn(ExperimentalComposeUiApi::class)
 fun main() {
-    val game = GameViewModel(JsonGameStore(BrowserStorage("emotional-chess-game")))
+    val game = GameViewModel(JsonGameStore(BrowserStorage("emotional-chess-game")), linkFactory = { PeerJsLink() })
+    val joinCode = invitationCode()
+    // Following an invitation replaces whatever game was open, unless this page is already in that room.
+    joinCode?.let(game::acceptInvitation)
     ComposeViewport(document.body!!) {
         val fonts = LocalFontFamilyResolver.current
         var ready by remember { mutableStateOf(false) }
@@ -50,7 +64,7 @@ fun main() {
             runCatching { fonts.preload(FontFamily(Font("DejaVuSansSymbols", fetchBytes("fonts/symbols.ttf")))) }
             ready = true
         }
-        if (ready) EmotionalChessTheme { App(game) }
+        if (ready) EmotionalChessTheme { App(game, joinCode) }
         else Box(Modifier.fillMaxSize().background(Color(0xFF140E1B)))
     }
 }

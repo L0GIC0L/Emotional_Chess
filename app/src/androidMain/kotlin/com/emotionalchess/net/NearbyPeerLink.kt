@@ -79,14 +79,14 @@ class NearbyPeerLink(context: Context) : PeerLink {
         }
     }
 
-    override fun host(name: String, listener: PeerListener) {
+    override fun host(name: String, listener: PeerListener, room: String?) {
         this.listener = listener
         myName = name
         client.startAdvertising(name, SERVICE_ID, lifecycle, AdvertisingOptions.Builder().setStrategy(STRATEGY).build())
             .addOnFailureListener { listener.onError(describe(it, "Could not make this phone visible")) }
     }
 
-    override fun join(name: String, listener: PeerListener) {
+    override fun join(name: String, listener: PeerListener, rejoin: String?) {
         this.listener = listener
         myName = name
         client.startDiscovery(SERVICE_ID, discovery, DiscoveryOptions.Builder().setStrategy(STRATEGY).build())
