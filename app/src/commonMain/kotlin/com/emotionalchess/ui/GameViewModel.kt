@@ -35,6 +35,18 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlin.random.Random
 
+/** An online game this page was part of, so a reload (common on phones) can pick it up again. */
+@Serializable
+data class LinkSave(
+    val role: Role,
+    val room: String,
+    val myName: String,
+    val mySide: Side? = null,
+    val peerName: String? = null,
+    /** Host still waiting for the friend: the game that starts when they join. */
+    val hosted: GameState? = null,
+)
+
 @Serializable
 data class SaveData(
     val game: GameState? = null,
@@ -42,11 +54,12 @@ data class SaveData(
     val undo: List<GameState> = emptyList(),
     val history: List<Snapshot> = emptyList(),
     val flipped: Boolean = false,
+    val link: LinkSave? = null,
 )
 
 interface GameStore {
     fun load(): SaveData?
-    fun save(game: GameState?, undo: List<GameState>, flipped: Boolean)
+    fun save(game: GameState?, undo: List<GameState>, flipped: Boolean, link: LinkSave?)
 }
 
 /** Where a save lives: a file on Android and desktop, browser storage on the web. */
@@ -63,11 +76,11 @@ class JsonGameStore(private val storage: TextStorage) : GameStore {
 
     override fun load(): SaveData? = runCatching { json.decodeFromString<SaveData>(storage.read()!!) }.getOrNull()
 
-    override fun save(game: GameState?, undo: List<GameState>, flipped: Boolean) {
+    override fun save(game: GameState?, undo: List<GameState>, flipped: Boolean, link: LinkSave?) {
         scope.launch {
             runCatching {
                 val history = if (game != null) History.compact(game, undo) else emptyList()
-                storage.write(json.encodeToString(SaveData.serializer(), SaveData(game, history = history, flipped = flipped)))
+                storage.write(json.encodeToString(SaveData.serializer(), SaveData(game, history = history, flipped = flipped, link = link)))
             }
         }
     }
@@ -88,6 +101,7 @@ enum class FeedbackKind { MOVE, CAPTURE, CHECK, GAME_OVER }
 /** One-shot haptic cue; a fresh [seq] makes every event distinct. */
 data class Feedback(val seq: Long, val kind: FeedbackKind)
 
+@Serializable
 enum class Role { HOST, GUEST }
 
 enum class LinkPhase {
@@ -115,6 +129,8 @@ data class OnlineState(
     /** Host: someone asking to join, and the pairing code both phones show. */
     val request: Endpoint? = null,
     val code: String? = null,
+    /** Online host: the room code the friend joins with. */
+    val roomCode: String? = null,
     val error: String? = null,
     /** The other player has offered a draw. */
     val drawOffered: Boolean = false,
@@ -127,6 +143,8 @@ class GameViewModel(
     private val linkFactory: (() -> PeerLink)? = null,
     /** Where background results are applied: the main thread in the apps; tests pass their own. */
     private val uiContext: CoroutineContext = mainOrUnconfined(),
+    /** Online (web) games are picked up again after a reload. Nearby links end with the app. */
+    private val resumeLinks: Boolean = linkStyle == LinkStyle.ONLINE,
 ) {
     /** Whether this platform can link two devices (Android, over Nearby). */
     val canLink: Boolean get() = linkFactory != null
@@ -169,6 +187,8 @@ class GameViewModel(
     private var hostedGame: GameState? = null
     /** Guest: the host's advertised name, to find it again after a dropped connection. */
     private var hostEndpointName: String? = null
+    /** Declared before init, which may resume a link (property initialisers run in order). */
+    private val listener: PeerListener by lazy { LinkEvents() }
 
     init {
         store.load()?.let { data ->
@@ -176,7 +196,31 @@ class GameViewModel(
             undoStack = data.game?.let { g -> if (data.history.isNotEmpty()) History.expand(g, data.history) else data.undo }.orEmpty()
             canUndo = undoStack.isNotEmpty()
             flipped = data.flipped
+            data.link?.takeIf { resumeLinks }?.let(::resume)
         }
+    }
+
+    /** Back after a reload: reopen the same room (host), or find it again (guest). */
+    private fun resume(save: LinkSave) {
+        val l = linkFactory?.invoke() ?: return
+        link = l
+        hostedGame = save.hosted
+        if (save.role == Role.HOST) {
+            val phase = if (game != null) LinkPhase.LOST else LinkPhase.WAITING
+            online = OnlineState(Role.HOST, phase, save.myName, save.mySide, save.peerName, roomCode = save.room)
+            l.host(save.myName, listener, room = save.room)
+        } else {
+            hostEndpointName = "Room ${save.room}"
+            online = OnlineState(Role.GUEST, LinkPhase.LOST, save.myName, save.mySide, save.peerName)
+            l.join(save.myName, listener, rejoin = save.room)
+        }
+    }
+
+    /** Opened from an invitation link: join that room, unless this page is already in it. */
+    fun acceptInvitation(code: String) {
+        val o = online
+        val room = if (o?.role == Role.HOST) o.roomCode else joiningRoom
+        if (room != code) closeGame()
     }
 
     // ----------------------------------------------------------- derived helpers
@@ -389,19 +433,25 @@ class GameViewModel(
         l.host("$me · ${mode.emoji} ${mode.title}", listener)
     }
 
-    /** Looks for a friend's phone that is hosting. */
-    fun joinGame(myName: String) {
+    /** Looks for a friend's phone that is hosting; online, joins the room [code] straight away. */
+    fun joinGame(myName: String, code: String? = null) {
         val l = linkFactory?.invoke() ?: run { online = OnlineState(Role.GUEST, LinkPhase.LOOKING, myName, error = NO_LINK); return }
         leaveOnline()
         link = l
         online = OnlineState(Role.GUEST, LinkPhase.LOOKING, myName.ifBlank { "Guest" })
         l.join(online!!.myName, listener)
+        val room = code?.trim()?.uppercase()
+        if (!room.isNullOrEmpty()) connectTo(Endpoint(room, "Room $room"))
     }
+
+    /** Online guest: the room code being joined. */
+    val joiningRoom: String? get() = hostEndpointName?.removePrefix("Room ")
 
     fun connectTo(endpoint: Endpoint) {
         val o = online ?: return
         hostEndpointName = endpoint.name
-        online = o.copy(phase = LinkPhase.CONNECTING, error = null)
+        // Reconnecting keeps showing "connection lost" until the game arrives.
+        online = o.copy(phase = if (o.phase == LinkPhase.LOST) LinkPhase.LOST else LinkPhase.CONNECTING, error = null)
         link?.connect(endpoint.id)
     }
 
@@ -445,13 +495,22 @@ class GameViewModel(
         send(NetMessage.State(g, side.other, seq))
     }
 
-    private val listener = object : PeerListener {
+    private inner class LinkEvents : PeerListener {
+        override fun onReady(code: String) {
+            online = online?.copy(roomCode = code, error = null)
+            persist()
+        }
+
         override fun onFound(endpoint: Endpoint) {
             val o = online ?: return
+            // After a dropped connection or a reload, go straight back to the same host – every time
+            // it is offered, since an earlier attempt may have failed.
+            if (o.phase == LinkPhase.LOST && endpoint.name == hostEndpointName) {
+                connectTo(endpoint)
+                return
+            }
             if (endpoint.id in o.found.map { it.id }) return
             online = o.copy(found = o.found + endpoint)
-            // After a dropped connection, find the same host again by its name.
-            if (o.phase == LinkPhase.LOST && endpoint.name == hostEndpointName) connectTo(endpoint)
         }
 
         override fun onLost(endpointId: String) {
@@ -476,6 +535,7 @@ class GameViewModel(
             val o = online ?: return
             if (o.phase == LinkPhase.WAITING || o.phase == LinkPhase.LOOKING) return
             online = o.copy(phase = LinkPhase.LOST, found = emptyList(), code = null, drawOffered = false)
+            persist()
             val l = link ?: return
             if (o.role == Role.HOST) {
                 val g = game
@@ -550,7 +610,14 @@ class GameViewModel(
 
     private fun persist() {
         canUndo = undoStack.isNotEmpty() && online == null
-        store.save(game, undoStack, flipped)
+        store.save(game, undoStack, flipped, linkSave())
+    }
+
+    private fun linkSave(): LinkSave? {
+        if (!resumeLinks) return null
+        val o = online ?: return null
+        val room = (if (o.role == Role.HOST) o.roomCode else joiningRoom) ?: return null
+        return LinkSave(o.role, room, o.myName, o.mySide, o.peerName, hostedGame)
     }
 
     companion object {

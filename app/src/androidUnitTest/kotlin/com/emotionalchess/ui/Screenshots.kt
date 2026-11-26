@@ -83,7 +83,7 @@ class Screenshots {
     private fun vmFor(game: GameState, select: String? = null): GameViewModel {
         val vm = GameViewModel(object : GameStore {
             override fun load() = SaveData(game = game)
-            override fun save(game: GameState?, undo: List<GameState>, flipped: Boolean) = Unit
+            override fun save(game: GameState?, undo: List<GameState>, flipped: Boolean, link: LinkSave?) = Unit
         }, uiContext = Dispatchers.Unconfined)
         if (select != null) vm.onSquareTapped(sq(select))
         return vm
@@ -202,7 +202,7 @@ class Screenshots {
         val b = net.newLink()
         val noSave = object : GameStore {
             override fun load(): SaveData? = null
-            override fun save(game: GameState?, undo: List<GameState>, flipped: Boolean) = Unit
+            override fun save(game: GameState?, undo: List<GameState>, flipped: Boolean, link: LinkSave?) = Unit
         }
         val host = GameViewModel(noSave, linkFactory = { a }, uiContext = Dispatchers.Unconfined)
         val guest = GameViewModel(noSave, linkFactory = { b }, uiContext = Dispatchers.Unconfined)
@@ -223,7 +223,7 @@ class Screenshots {
         val b = net.newLink()
         val noSave = object : GameStore {
             override fun load(): SaveData? = null
-            override fun save(game: GameState?, undo: List<GameState>, flipped: Boolean) = Unit
+            override fun save(game: GameState?, undo: List<GameState>, flipped: Boolean, link: LinkSave?) = Unit
         }
         val host = GameViewModel(noSave, linkFactory = { a }, uiContext = Dispatchers.Unconfined)
         val guest = GameViewModel(noSave, linkFactory = { b }, uiContext = Dispatchers.Unconfined)

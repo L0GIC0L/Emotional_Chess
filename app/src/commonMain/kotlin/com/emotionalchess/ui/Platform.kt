@@ -27,5 +27,16 @@ expect fun rememberLinkPermission(): LinkPermission
 @Composable
 expect fun displayFontFamily(): FontFamily
 
+/** How this platform links two players: phones in the same room, browsers online, or not at all. */
+enum class LinkStyle { NONE, NEARBY, ONLINE }
+
+expect val linkStyle: LinkStyle
+
+/** A link that opens the game and joins room [code], or null where the platform has no links. */
+expect fun joinLink(code: String): String?
+
+/** Hands [text] to the share sheet, or copies it. Returns a word for what happened, or null if neither worked. */
+expect fun shareText(text: String): String?
+
 /** How long a hint may think. A browser has a single thread, so it thinks for less there. */
 expect val hintBudgetMs: Long

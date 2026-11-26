@@ -45,3 +45,9 @@ fun saveFile(): File {
     val dir = if (appData != null) File(appData, "EmotionalChess") else File(System.getProperty("user.home"), ".emotionalchess")
     return File(dir, "game.json")
 }
+
+actual val linkStyle: LinkStyle = LinkStyle.NONE
+
+actual fun joinLink(code: String): String? = null
+
+actual fun shareText(text: String): String? = null

@@ -21,8 +21,8 @@ class GameViewModelTest {
 
     private class MemoryStore(var data: SaveData? = null) : GameStore {
         override fun load() = data
-        override fun save(game: GameState?, undo: List<GameState>, flipped: Boolean) {
-            data = SaveData(game, undo = undo, flipped = flipped)
+        override fun save(game: GameState?, undo: List<GameState>, flipped: Boolean, link: LinkSave?) {
+            data = SaveData(game, undo = undo, flipped = flipped, link = link)
         }
     }
 

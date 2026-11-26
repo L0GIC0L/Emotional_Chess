@@ -84,3 +84,9 @@ class FileStorage(private val file: File) : TextStorage {
         }
     }
 }
+
+actual val linkStyle: LinkStyle = LinkStyle.NEARBY
+
+actual fun joinLink(code: String): String? = null
+
+actual fun shareText(text: String): String? = null

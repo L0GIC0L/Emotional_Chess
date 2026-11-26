@@ -33,6 +33,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -56,8 +59,13 @@ fun LobbyScreen(vm: GameViewModel) {
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             Spacer(Modifier.height(16.dp))
-            Radar(Modifier.size(180.dp), emoji = if (o.role == Role.HOST) "📡" else "🔎")
+            val onlineStyle = linkStyle == LinkStyle.ONLINE
+            Radar(Modifier.size(180.dp), emoji = if (onlineStyle) (if (o.role == Role.HOST) "🌐" else "🔗") else if (o.role == Role.HOST) "📡" else "🔎")
             val (title, text) = when {
+                onlineStyle && o.role == Role.HOST -> "Waiting for your friend" to
+                    "Send them the link, or tell them the room code. They can join from any browser – phone or computer. Keep this page open."
+                onlineStyle -> "Joining room ${vm.joiningRoom ?: ""}…" to
+                    "Connecting to your friend's browser."
                 o.role == Role.HOST -> "Waiting for your friend" to
                     "On the other phone, open Emotional Chess, choose Two phones and tap Join a friend. Keep Bluetooth and Wi-Fi on."
                 o.phase == LinkPhase.CONNECTING -> "Joining…" to
@@ -68,7 +76,8 @@ fun LobbyScreen(vm: GameViewModel) {
             Text(title, style = MaterialTheme.typography.headlineMedium, textAlign = TextAlign.Center)
             Text(text, color = scheme.onSurfaceVariant, textAlign = TextAlign.Center)
 
-            if (o.role == Role.GUEST && o.code != null) PairingCode(o.code, "The same code should show on your friend's phone.")
+            if (onlineStyle && o.role == Role.HOST) RoomInvite(o.roomCode)
+            if (!onlineStyle && o.role == Role.GUEST && o.code != null) PairingCode(o.code, "The same code should show on your friend's phone.")
 
             if (o.role == Role.GUEST && o.phase == LinkPhase.LOOKING) {
                 for (e in o.found) {
@@ -110,6 +119,26 @@ fun LobbyScreen(vm: GameViewModel) {
             confirmButton = { Button(onClick = { vm.answerJoinRequest(true) }) { Text("Let them in") } },
             dismissButton = { TextButton(onClick = { vm.answerJoinRequest(false) }) { Text("Decline") } },
         )
+    }
+}
+
+/** Online host: the room code, the invitation link and a button to share it. */
+@Composable
+private fun RoomInvite(code: String?) {
+    val scheme = MaterialTheme.colorScheme
+    if (code == null) {
+        Text("Opening a room…", color = scheme.onSurfaceVariant)
+        return
+    }
+    var shared by remember(code) { mutableStateOf<String?>(null) }
+    val link = joinLink(code)
+    PairingCode(code, "Room code")
+    if (link != null) {
+        Text(link, style = MaterialTheme.typography.bodySmall, color = scheme.secondary, textAlign = TextAlign.Center)
+        Button(onClick = { shared = shareText(link) ?: "Copy the link above by hand" }) {
+            Text("🔗  Share the invitation link")
+        }
+        shared?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = scheme.tertiary) }
     }
 }
 
